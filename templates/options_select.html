@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+{% block title %}选择属性 · 维护选项树{% endblock %}
+{% block content %}
+<h2>选择一个属性（可按作用域筛选）</h2>
+<form method="get">
+  <label>作用域 scope：</label>
+  <select name="scope" onchange="this.form.submit()">
+    <option value="">全部</option>
+    <option value="device" {{ 'selected' if scope=='device' else '' }}>device</option>
+    <option value="port" {{ 'selected' if scope=='port' else '' }}>port</option>
+  </select>
+</form>
+
+<table class="table">
+  <thead><tr><th>ID</th><th>code</th><th>name</th><th>scope</th><th>data_type</th><th>操作</th></tr></thead>
+  <tbody>
+    {% for a in attrs %}
+      <tr>
+        <td>{{ a.id }}</td>
+        <td>{{ a.code }}</td>
+        <td>{{ a.name }}</td>
+        <td>{{ a.scope }}</td>
+        <td>{{ a.data_type }}</td>
+        <td>
+          {% if a.data_type == 'enum' %}
+            <a href="{{ url_for('options.manage_options', attribute_id=a.id) }}">管理选项</a>
+          {% else %}
+            <span class="muted">非枚举属性无选项</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

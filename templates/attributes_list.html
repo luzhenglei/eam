@@ -1,0 +1,69 @@
+{% extends "layout.html" %}
+{% block title %}属性管理 · 列表{% endblock %}
+{% block content %}
+<h2>属性管理 · 列表</h2>
+
+<form method="get" class="filters">
+  <input type="text" name="q" placeholder="按 code/name 搜索" value="{{ q or '' }}">
+  <select name="scope">
+    {% for s in scopes %}
+      <option value="{{ s }}" {{ 'selected' if scope==s else '' }}>{{ s or '全部scope' }}</option>
+    {% endfor %}
+  </select>
+  <select name="data_type">
+    {% for t in dtypes %}
+      <option value="{{ t }}" {{ 'selected' if data_type==t else '' }}>{{ t or '全部data_type' }}</option>
+    {% endfor %}
+  </select>
+  <select name="page_size">
+    {% for n in [10,20,50] %}
+      <option value="{{n}}" {{ 'selected' if page_size==n else '' }}>{{n}}/页</option>
+    {% endfor %}
+  </select>
+  <button class="btn primary" type="submit">查询</button>
+  <a class="btn" href="{{ url_for('attributes.create_page') }}">新增属性</a>
+</form>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>ID</th><th>code</th><th>name</th><th>scope</th><th>data_type</th><th>allow_multi</th><th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.scope }}</td>
+        <td>{{ r.data_type }}</td>
+        <td>{{ r.allow_multi }}</td>
+        <td>
+          <a href="{{ url_for('attributes.edit_page', attr_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('attributes.remove', attr_id=r.id) }}" style="display:inline" onsubmit="return confirm('删除后不可恢复，且可能影响关联，请确认');">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}
+      <tr><td colspan="7" class="muted">无数据</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+{% set pages = (total // page_size) + (1 if total % page_size else 0) %}
+{% if pages > 1 %}
+  <div class="pager">
+    {% for p in range(1, pages+1) %}
+      {% if p == page %}
+        <span class="page current">{{p}}</span>
+      {% else %}
+        <a class="page" href="{{ url_for('attributes.list_page', q=q, scope=scope, data_type=data_type, page=p, page_size=page_size) }}">{{p}}</a>
+      {% endif %}
+    {% endfor %}
+    <span class="muted">共 {{ total }} 条</span>
+  </div>
+{% endif %}
+{% endblock %}

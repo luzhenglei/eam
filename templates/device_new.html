@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% block title %}新建设备{% endblock %}
+{% block content %}
+<h2>新建设备</h2>
+<form method="post">
+  <div class="grid-2">
+    <div>
+      <label>选择模板</label>
+      <select name="template_id" required>
+        <option value="">（请选择一个模板）</option>
+        {% for t in templates %}
+          <option value="{{ t.id }}">{{ t.id }} - {{ t.name }} ({{ t.device_type }}, v{{ t.version }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>设备名称</label>
+      <input type="text" name="name" required placeholder="例如：核心交换机-01">
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <label>型号 model_code</label>
+      <input type="text" name="model_code" required placeholder="例如：S5720-28X-SI-AC">
+    </div>
+    <div>
+      <!-- 预留位（将来可放 serial_no / 备注等） -->
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" type="submit">创建</button>
+    <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% block title %}设备管理 · 列表{% endblock %}
+{% block content %}
+<h2>设备管理 · 列表</h2>
+<p><a class="btn primary" href="{{ url_for('devices_bp.new_device') }}">新建设备</a></p>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th style="width:60px;">ID</th>
+      <th>名称</th>
+      <th>模板</th>
+      <th>类型</th>
+      <th style="width:200px;">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.template_name or '-' }}</td>
+        <td>{{ r.device_type or '-' }}</td>
+        <td>
+          <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=r.id) }}">填写/编辑属性</a>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}
+      <tr><td colspan="5" class="muted">暂无设备</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

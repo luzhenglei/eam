@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+{% block title %}管理选项树 · {{ attr.code }}{% endblock %}
+{% block content %}
+<h2>属性：{{ attr.code }}（{{ attr.name }}）</h2>
+<p class="muted">仅 <code>enum</code> 属性使用此页面。删除父节点会级联删除其所有子节点；若选项已在设备/端口属性中被使用，将被阻止删除并提示原因。</p>
+
+<div class="grid-2">
+  <div>
+    <h3>新增选项</h3>
+    <form method="post">
+      <input type="hidden" name="action" value="create">
+      <label>名称 name</label>
+      <input type="text" name="name" required>
+      <label>编码 code（可选）</label>
+      <input type="text" name="code">
+      <label>父节点 parent_id（为空=挂到属性根）</label>
+      <select name="parent_id">
+        <option value="">（挂到属性根）</option>
+        {% for r in rows %}
+          <option value="{{ r.id }}">{{ r.id }} - {{ r.name }}</option>
+        {% endfor %}
+      </select>
+      <label>排序 sort_order（整数，越小越靠前）</label>
+      <input type="number" name="sort_order" value="0">
+      <div class="actions">
+        <button class="btn primary" type="submit">新增</button>
+      </div>
+    </form>
+
+    <hr>
+    <h3>已有选项（编辑/删除）</h3>
+    {% for r in rows %}
+      <form method="post" class="row-form">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="opt_id" value="{{ r.id }}">
+        <div class="row-grid">
+          <div>
+            <label>ID</label>
+            <input type="text" value="{{ r.id }}" disabled>
+          </div>
+          <div>
+            <label>名称</label>
+            <input type="text" name="name" value="{{ r.name }}">
+          </div>
+          <div>
+            <label>编码</label>
+            <input type="text" name="code" value="{{ r.code or '' }}">
+          </div>
+          <div>
+            <label>父节点</label>
+            <select name="parent_id">
+              <option value="">（挂到属性根）</option>
+              {% for x in rows %}
+                <option value="{{ x.id }}" {{ 'selected' if r.parent_id==x.id else '' }}>{{ x.id }} - {{ x.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>排序</label>
+            <input type="number" name="sort_order" value="{{ r.sort_order or 0 }}">
+          </div>
+          <div class="row-actions">
+            <button class="btn primary" type="submit">保存</button>
+          </div>
+        </div>
+      </form>
+      <form method="post" onsubmit="return confirm('确定删除此选项及其所有子节点？若被引用将被阻止删除。');" style="margin-bottom:.75rem">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="opt_id" value="{{ r.id }}">
+        {% if root and r.id == root.id %}
+          <button class="btn danger" type="submit" disabled title="根节点不可删除">删除（根节点禁止）</button>
+        {% else %}
+          <button class="btn danger" type="submit">删除</button>
+        {% endif %}
+      </form>
+      <hr>
+    {% endfor %}
+    {% if not rows %}
+      <p class="muted">暂无选项</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <h3>选项树</h3>
+    <ul class="tree">
+      {% if tree_root %}
+      {% macro render(node) -%}
+        <li>
+          <span>#{{ node.id }} {{ node.name }} <small class="muted">(sort={{ node.sort_order or 0 }})</small></span>
+          {% if node.children %}
+            <ul>
+              {%- for c in node.children %} {{ render(c) }} {%- endfor %}
+            </ul>
+          {% endif %}
+        </li>
+      {%- endmacro %}
+
+      <li>
+        <strong>{{ attr.name }}（根）</strong>
+        {% if tree_root.children %}
+          <ul>
+            {%- for c in tree_root.children %} {{ render(c) }} {%- endfor %}
+          </ul>
+        {% else %}
+          <ul><li class="muted">（该属性暂无任何子选项）</li></ul>
+        {% endif %}
+      </li>
+      {% else %}
+        <li class="muted">未找到根节点</li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

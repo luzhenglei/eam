@@ -1,0 +1,62 @@
+# blueprints/templates_admin.py
+from flask import Blueprint, render_template, request, redirect, url_for, flash
+from services.template_service import list_templates, create_template, delete_template
+from services.template_service import list_templates, create_template, delete_template, get_template, update_template
+
+bp_templates_admin = Blueprint("templates_admin", __name__, url_prefix="/templates-admin")
+
+@bp_templates_admin.route("/", methods=["GET"])
+def list_page():
+    rows = list_templates()
+    return render_template("templates_list.html", rows=rows)
+
+@bp_templates_admin.route("/new", methods=["GET","POST"])
+def new_page():
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        device_type = (request.form.get("device_type") or "").strip()
+        version = request.form.get("version", type=int, default=1)
+        is_locked = 1 if request.form.get("is_locked") else 0
+        if not name or not device_type:
+            flash("name 与 device_type 必填", "err")
+        else:
+            try:
+                create_template(name, device_type, version, is_locked)
+                flash("已创建模板", "ok")
+                return redirect(url_for("templates_admin.list_page"))
+            except Exception as e:
+                flash(f"创建失败：{e}", "err")
+    return render_template("template_form.html")
+
+@bp_templates_admin.route("/<int:tpl_id>/delete", methods=["POST"])
+def remove(tpl_id):
+    try:
+        delete_template(tpl_id)
+        flash("已删除模板", "ok")
+    except Exception as e:
+        flash(f"删除失败：{e}", "err")
+    return redirect(url_for("templates_admin.list_page"))
+
+@bp_templates_admin.route("/<int:tpl_id>/edit", methods=["GET","POST"])
+def edit_page(tpl_id):
+    item = get_template(tpl_id)
+    if not item:
+        flash("模板不存在", "err")
+        return redirect(url_for("templates_admin.list_page"))
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        device_type = (request.form.get("device_type") or "").strip()
+        version = request.form.get("version", type=int, default=1)
+        is_locked = 1 if request.form.get("is_locked") else 0
+        if not name or not device_type:
+            flash("name 与 device_type 必填", "err")
+        else:
+            try:
+                update_template(tpl_id, name, device_type, version, is_locked)
+                flash("已保存修改", "ok")
+                return redirect(url_for("templates_admin.list_page"))
+            except Exception as e:
+                flash(f"保存失败：{e}", "err")
+
+    return render_template("template_form.html", item=item)

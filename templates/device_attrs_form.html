@@ -1,0 +1,263 @@
+{% extends "layout.html" %}
+{% block title %}设备属性 · {{ device.name }}{% endblock %}
+{% block content %}
+<h2>设备属性 · {{ device.name }} <span class="muted">（模板：{{ device.template_name }}）</span></h2>
+
+<form method="post" id="attrForm">
+  <!-- 普通属性（非级联） -->
+  <table class="table">
+    <thead>
+      <tr>
+        <th style="width:60px;">ID</th>
+        <th>code / name</th>
+        <th>类型</th>
+        <th>是否必填</th>
+        <th>取值</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in attrs.flat_attrs %}
+        <tr>
+          <td>{{ a.attribute_id }}</td>
+          <td><div><code>{{ a.code }}</code></div><div>{{ a.name }}</div></td>
+          <td>{{ a.data_type }}{% if a.data_type=='enum' and a.allow_multi %}（多选）{% endif %}</td>
+          <td>{{ '是' if a.is_required else '否' }}</td>
+          <td>
+            {% if a.data_type == 'enum' %}
+              {% if a.allow_multi %}
+                <select name="attr_{{ a.attribute_id }}" multiple size="4" style="min-width:240px">
+                  {% for op in a.options %}
+                    <option value="{{ op.id }}" {{ 'selected' if op.id in a.current.enum_option_ids else '' }}>
+                      {{ op.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                <select name="attr_{{ a.attribute_id }}" style="min-width:240px">
+                  <option value="">（请选择）</option>
+                  {% for op in a.options %}
+                    <option value="{{ op.id }}" {{ 'selected' if a.current.enum_option_ids and op.id==a.current.enum_option_ids[0] else '' }}>
+                      {{ op.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              {% endif %}
+            {% else %}
+              <input type="text" name="attr_{{ a.attribute_id }}" value="{{ a.current.value_text or '' }}" style="min-width:240px">
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      {% if not attrs.flat_attrs %}
+        <tr><td colspan="5" class="muted">无普通属性</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <!-- 级联组：单属性 + 树（可有多个组） -->
+  <div id="cascadedContainer"></div>
+
+  <div class="actions" style="margin-top:1rem;">
+    <button class="btn primary" type="submit">保存属性</button>
+    <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回</a>
+  </div>
+</form>
+
+<!-- 用 JSON script 传递级联组数据（每组：base、tree_attr_id、selected_chain） -->
+<script type="application/json" id="cascaded-data">
+{{ (
+  attrs.cascaded_groups
+  | map(attribute='base')
+  | list
+  | length
+  and attrs.cascaded_groups
+  or []
+) | tojson }}
+</script>
+
+<script>
+async function fetchJSON(url){ const r = await fetch(url); return await r.json(); }
+const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?attribute_id=&parent_id=
+</script>
+
+<script>
+(function(){
+  const container = document.getElementById('cascadedContainer');
+  let groups = [];
+  try {
+    const raw = document.getElementById('cascaded-data')?.textContent || '[]';
+    groups = JSON.parse(raw);
+  } catch(e) { groups = []; }
+
+  function renderGroup(g, idx){
+    const base = g.base;
+    const attrId = g.tree_attr_id || g.attribute_id;
+    const initChain = (g.selected_chain || []);
+    const initTexts = (g.texts && Array.isArray(g.texts.levels)) ? g.texts.levels : [];
+    const initRootText = (g.texts && g.texts.root) ? g.texts.root : "";
+
+    const wrap = document.createElement('div');
+    wrap.style.margin = '16px 0';
+    wrap.style.padding = '12px';
+    wrap.style.border = '1px solid #eee';
+    wrap.style.borderRadius = '8px';
+
+    const title = document.createElement('h3');
+    title.textContent = '级联：' + base;
+    title.style.margin = '0 0 8px';
+    wrap.appendChild(title);
+
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'group_' + base + '_chain';
+    hidden.value = initChain.join(',');
+    wrap.appendChild(hidden);
+
+    // 根级文本（默认回显）
+    const rootRow = document.createElement('div');
+    rootRow.style.display = 'flex';
+    rootRow.style.alignItems = 'center';
+    rootRow.style.gap = '8px';
+    rootRow.style.margin = '6px 0';
+    const rootLabel = document.createElement('div');
+    rootLabel.style.width = '140px';
+    rootLabel.style.color = '#666';
+    rootLabel.textContent = '根级取值';
+    rootRow.appendChild(rootLabel);
+    const rootInput = document.createElement('input');
+    rootInput.type = 'text';
+    rootInput.style.minWidth = '240px';
+    rootInput.name = 'attr_' + attrId + '_text_root';
+    rootInput.value = initRootText || '';   // ← 回显根文本
+    rootRow.appendChild(rootInput);
+    wrap.appendChild(rootRow);
+
+    const levelsBox = document.createElement('div');
+    levelsBox.style.display = 'flex';
+    levelsBox.style.flexDirection = 'column';
+    levelsBox.style.gap = '8px';
+    wrap.appendChild(levelsBox);
+
+    container.appendChild(wrap);
+
+    let chain = initChain.slice();
+    function updateHidden(){ hidden.value = chain.filter(Boolean).join(','); }
+
+    function makeLevelRow(levelIndex){
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '8px';
+
+      const lab = document.createElement('div');
+      lab.style.width = '140px';
+      lab.style.color = '#666';
+      lab.textContent = `第 ${levelIndex+1} 级`;
+      row.appendChild(lab);
+
+      const sel = document.createElement('select');
+      sel.style.minWidth = '200px';
+      const blank = document.createElement('option');
+      blank.value = ''; blank.textContent = '（空）';
+      sel.appendChild(blank);
+      row.appendChild(sel);
+
+      const txt = document.createElement('input');
+      txt.type = 'text';
+      txt.style.minWidth = '240px';
+      txt.name = `attr_${attrId}_text_${levelIndex}`;
+      txt.style.display = 'none';
+      row.appendChild(txt);
+
+      levelsBox.appendChild(row);
+      return {row, sel, txt};
+    }
+
+    async function loadLevel(levelIndex, parentOid, preOid, preText){
+      while (levelsBox.children.length <= levelIndex){
+        makeLevelRow(levelsBox.children.length);
+      }
+      const row = levelsBox.children[levelIndex];
+      const sel = row.children[1];
+      const txt = row.children[2];
+
+      while (sel.options.length > 1) sel.remove(1);
+
+      const q = parentOid ? `&parent_id=${parentOid}` : '';
+      const url = `${API_CHILDREN}?attribute_id=${attrId}${q}`;
+      const res = await fetchJSON(url);
+      const ops = (res && res.ok) ? (res.data || []) : [];
+
+      ops.forEach(o=>{
+        const opt = document.createElement('option');
+        opt.value = String(o.id);
+        opt.textContent = o.name;
+        sel.appendChild(opt);
+      });
+
+      if (preOid && ops.some(o=>Number(o.id)===Number(preOid))){
+        sel.value = String(preOid);
+        txt.style.display = '';
+        txt.value = preText || '';        // ← 回显该级文本
+      } else {
+        sel.value = '';
+        txt.style.display = 'none';
+        txt.value = '';
+      }
+
+      while (levelsBox.children.length > levelIndex + 1){
+        levelsBox.removeChild(levelsBox.lastChild);
+      }
+      updateHidden();
+    }
+
+    function bindChange(levelIndex){
+      const row = levelsBox.children[levelIndex];
+      const sel = row.children[1];
+      const txt = row.children[2];
+      sel.addEventListener('change', async ()=>{
+        chain = chain.slice(0, levelIndex);
+        const v = sel.value ? Number(sel.value) : null;
+        if (v){
+          chain[levelIndex] = v;
+          txt.style.display = '';
+          // 下一层无预填文本
+          await loadLevel(levelIndex + 1, v, null, '');
+          if (levelsBox.children[levelIndex+1]){
+            bindChange(levelIndex+1);
+          }
+        }else{
+          txt.style.display = 'none';
+          txt.value = '';
+          while (levelsBox.children.length > levelIndex + 1){
+            levelsBox.removeChild(levelsBox.lastChild);
+          }
+        }
+        updateHidden();
+      });
+    }
+
+    (async function init(){
+      let parent = null;
+      for (let i=0; i<=initChain.length; i++){
+        const preOid = initChain[i] || null;
+        const preText = (i < initTexts.length) ? (initTexts[i] || '') : '';
+        await loadLevel(i, parent, preOid, preText);
+        bindChange(i);
+        if (preOid){
+          parent = preOid;
+        }else{
+          break;
+        }
+      }
+      updateHidden();
+    })();
+  }
+
+  if (Array.isArray(groups) && groups.length){
+    groups.forEach((g, i)=>renderGroup(g, i));
+  }
+})();
+</script>
+
+{% endblock %}

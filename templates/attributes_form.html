@@ -1,0 +1,85 @@
+{% extends "layout.html" %}
+{% block title %}属性管理 · {{ '编辑' if item else '新增' }}{% endblock %}
+{% block content %}
+<h2>属性管理 · {{ '编辑' if item else '新增' }}</h2>
+
+<form method="post">
+  <div class="grid-2">
+    <div>
+      <label>code（唯一）</label>
+      <input type="text" name="code" value="{{ item.code if item else '' }}" required>
+    </div>
+    <div>
+      <label>name</label>
+      <input type="text" name="name" value="{{ item.name if item else '' }}" required>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <label>scope</label>
+      <select name="scope" required>
+        {% for s in scopes %}
+          <option value="{{s}}" {{ 'selected' if item and item.scope==s else '' }}>{{s}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>data_type</label>
+      <select name="data_type" id="dtype" onchange="onDTypeChange()" required>
+        {% for t in dtypes %}
+          <option value="{{t}}" {{ 'selected' if item and item.data_type==t else '' }}>{{t}}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div>
+      <label>unit（可选）</label>
+      <input type="text" name="unit" value="{{ item.unit if item else '' }}">
+    </div>
+    <div>
+      <label>min_value（可选）</label>
+      <input type="number" step="0.000001" name="min_value" value="{{ item.min_value if item and item.min_value is not none }}">
+    </div>
+    <div>
+      <label>max_value（可选）</label>
+      <input type="number" step="0.000001" name="max_value" value="{{ item.max_value if item and item.max_value is not none }}">
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <label>allow_multi（仅 enum 有效）</label>
+      <select name="allow_multi" id="allow_multi">
+        <option value="0" {{ 'selected' if not item or (item and item.allow_multi==0) else '' }}>0（单选）</option>
+        <option value="1" {{ 'selected' if item and item.allow_multi==1 else '' }}>1（多选）</option>
+      </select>
+    </div>
+    <div>
+      <label>描述（可选）</label>
+      <input type="text" name="description" value="{{ item.description if item else '' }}">
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" type="submit">保存</button>
+    <a class="btn" href="{{ url_for('attributes.list_page') }}">返回列表</a>
+  </div>
+</form>
+
+<script>
+  function onDTypeChange() {
+    const dtype = document.getElementById('dtype').value;
+    const allow = document.getElementById('allow_multi');
+    if (dtype === 'enum') {
+      allow.disabled = false;
+    } else {
+      allow.value = "0";
+      allow.disabled = true;
+    }
+  }
+  onDTypeChange();
+</script>
+{% endblock %}

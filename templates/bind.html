@@ -1,0 +1,62 @@
+{% extends "layout.html" %}
+{% block title %}模板属性绑定{% endblock %}
+{% block content %}
+<h2>模板属性绑定 / 必填标记</h2>
+
+<form method="get">
+  <label>选择模板：</label>
+  <select name="template_id" onchange="this.form.submit()">
+    <option value="">（请选择）</option>
+    {% for t in templates %}
+      <option value="{{ t.id }}" {{ 'selected' if tpl_id==t.id else '' }}>
+        {{ t.id }} - {{ t.name }} ({{ t.device_type }}, v{{ t.version }}) {% if t.is_locked %}[locked]{% endif %}
+      </option>
+    {% endfor %}
+  </select>
+
+  <label style="margin-left:1rem">作用域：</label>
+  <select name="scope" onchange="this.form.submit()">
+    <option value="device" {{ 'selected' if scope=='device' else '' }}>device</option>
+    <option value="port" {{ 'selected' if scope=='port' else '' }}>port</option>
+  </select>
+</form>
+
+{% if tpl_id %}
+  <form method="post">
+    <input type="hidden" name="template_id" value="{{ tpl_id }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th><th>code</th><th>name</th><th>scope</th><th>data_type</th>
+          <th>包含</th><th>必填</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.attribute_id }}</td>
+            <td>{{ r.code }}</td>
+            <td>{{ r.name }}</td>
+            <td>{{ r.scope }}</td>
+            <td>{{ r.data_type }}</td>
+            <td>
+              <input type="checkbox" name="include_ids" value="{{ r.attribute_id }}" {{ 'checked' if r.is_required is not none else '' }}>
+            </td>
+            <td>
+              <input type="checkbox" name="required_ids" value="{{ r.attribute_id }}" {{ 'checked' if r.is_required==1 else '' }}>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="actions">
+      <button class="btn primary" type="submit">保存</button>
+    </div>
+  </form>
+{% else %}
+  <p class="muted">请先选择模板。</p>
+{% endif %}
+{% endblock %}

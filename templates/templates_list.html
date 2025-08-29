@@ -1,0 +1,43 @@
+{% extends "layout.html" %}
+{% block title %}模板管理 · 列表{% endblock %}
+{% block content %}
+<h2>模板管理 · 列表</h2>
+
+<p>
+  <a class="btn primary" href="{{ url_for('templates_admin.new_page') }}">新增模板</a>
+</p>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th style="width:60px;">ID</th>
+      <th>name</th>
+      <th>device_type</th>
+      <th style="width:90px;">version</th>
+      <th style="width:100px;">is_locked</th>
+      <th style="width:320px;">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.device_type }}</td>
+        <td>{{ r.version }}</td>
+        <td>{{ r.is_locked }}</td>
+        <td>
+          <a class="btn" href="{{ url_for('templates_admin.edit_page', tpl_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('templates_admin.remove', tpl_id=r.id) }}" onsubmit="return confirm('确认删除该模板？');" style="display:inline">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+          <a class="btn" href="{{ url_for('templates_bp.bind', template_id=r.id) }}">去绑定属性</a>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}
+      <tr><td colspan="6" class="muted">暂无模板</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

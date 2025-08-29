@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+{% block title %}模板管理 · {{ '编辑' if item else '新增' }}{% endblock %}
+{% block content %}
+<h2>模板管理 · {{ '编辑' if item else '新增' }}</h2>
+<form method="post">
+  <div class="grid-2">
+    <div>
+      <label>name</label>
+      <input type="text" name="name" value="{{ item.name if item else '' }}" required>
+    </div>
+    <div>
+      <label>device_type</label>
+      <input type="text" name="device_type" value="{{ item.device_type if item else '' }}" required placeholder="Switch / Router / Server ...">
+    </div>
+  </div>
+  <div class="grid-2">
+    <div>
+      <label>version</label>
+      <input type="number" name="version" value="{{ item.version if item else 1 }}" min="1">
+    </div>
+    <div>
+      <label><input type="checkbox" name="is_locked" {{ 'checked' if item and item.is_locked else '' }}> is_locked</label>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="submit">保存</button>
+    <a class="btn" href="{{ url_for('templates_admin.list_page') }}">返回列表</a>
+  </div>
+</form>
+{% endblock %}

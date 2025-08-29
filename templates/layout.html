@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}EAM Admin{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="nav">
+    <a href="{{ url_for('home.index') }}">首页</a>
+    <a href="{{ url_for('attributes.list_page') }}">属性管理</a>
+    <a href="{{ url_for('options.select_attribute') }}">维护属性选项树</a>
+    <a href="{{ url_for('templates_admin.list_page') }}">模板管理</a>
+    <a href="{{ url_for('templates_bp.bind') }}">模板属性绑定</a>
+    <a href="{{ url_for('devices_bp.list_page') }}">设备</a>
+
+
+  </nav>
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+          <div class="{{ 'alert-ok' if cat=='ok' else 'alert-err' }}">{{ msg|safe }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
