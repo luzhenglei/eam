@@ -4,7 +4,7 @@
 <h2>设备属性 · {{ device.name }} <span class="muted">（模板：{{ device.template_name }}）</span></h2>
 
 <form method="post" id="attrForm">
-  <!-- 普通属性（非级联） -->
+  <!-- ===================== 设备：普通属性 ===================== -->
   <table class="table">
     <thead>
       <tr>
@@ -54,8 +54,66 @@
     </tbody>
   </table>
 
-  <!-- 级联组：单属性 + 树（可有多个组） -->
+  <!-- ===================== 设备：单属性树级联 ===================== -->
   <div id="cascadedContainer"></div>
+
+  <!-- ===================== 端口属性（每个端口一个区块） ===================== -->
+  <h3 style="margin-top:24px;">端口属性</h3>
+  {% for p in attrs.ports %}
+    <fieldset style="border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0;">
+      <legend>端口：{{ p.port.name }}（ID: {{ p.port.id }}）</legend>
+
+      <!-- 端口普通属性 -->
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:60px;">ID</th>
+            <th>code / name</th>
+            <th>类型</th>
+            <th>取值</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for a in p.flat_attrs %}
+          <tr>
+            <td>{{ a.attribute_id }}</td>
+            <td><div><code>{{ a.code }}</code></div><div>{{ a.name }}</div></td>
+            <td>{{ a.data_type }}</td>
+            <td>
+              {% if a.data_type == 'enum' %}
+                <select name="port_{{ p.port.id }}_attr_{{ a.attribute_id }}" style="min-width:220px">
+                  <option value="">（请选择）</option>
+                  {% for op in a.options %}
+                    <option value="{{ op.id }}" {{ 'selected' if a.current.enum_option_ids and op.id==a.current.enum_option_ids[0] else '' }}>
+                      {{ op.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                <input type="text" name="port_{{ p.port.id }}_attr_{{ a.attribute_id }}" value="{{ a.current.value_text or '' }}" style="min-width:240px;">
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        {% if not p.flat_attrs %}
+          <tr><td colspan="4" class="muted">无普通属性</td></tr>
+        {% endif %}
+        </tbody>
+      </table>
+
+      <!-- 端口单属性树级联：占位节点，JS 根据 data-* 渲染 -->
+      {% for g in p.cascaded_groups %}
+        <div class="port-cascade"
+             data-port="{{ p.port.id }}"
+             data-attr="{{ g.tree_attr_id }}"
+             data-base="{{ g.base }}"
+             data-chain='{{ g.selected_chain | tojson | safe }}'
+             data-root='{{ g.texts.root | default("") | tojson | safe }}'
+             data-levels='{{ g.texts.levels | default([]) | tojson | safe }}'>
+        </div>
+      {% endfor %}
+    </fieldset>
+  {% endfor %}
 
   <div class="actions" style="margin-top:1rem;">
     <button class="btn primary" type="submit">保存属性</button>
@@ -63,23 +121,15 @@
   </div>
 </form>
 
-<!-- 用 JSON script 传递级联组数据（每组：base、tree_attr_id、selected_chain） -->
-<script type="application/json" id="cascaded-data">
-{{ (
-  attrs.cascaded_groups
-  | map(attribute='base')
-  | list
-  | length
-  and attrs.cascaded_groups
-  or []
-) | tojson }}
-</script>
+<!-- 设备级级联的模型数据（JSON 注入，避免模板表达式冲突） -->
+<script type="application/json" id="cascaded-data">{{ attrs.cascaded_groups | tojson }}</script>
 
 <script>
 async function fetchJSON(url){ const r = await fetch(url); return await r.json(); }
 const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?attribute_id=&parent_id=
 </script>
 
+<!-- ===================== 设备级：单属性树级联渲染 ===================== -->
 <script>
 (function(){
   const container = document.getElementById('cascadedContainer');
@@ -128,7 +178,7 @@ const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?att
     rootInput.type = 'text';
     rootInput.style.minWidth = '240px';
     rootInput.name = 'attr_' + attrId + '_text_root';
-    rootInput.value = initRootText || '';   // ← 回显根文本
+    rootInput.value = initRootText || '';
     rootRow.appendChild(rootInput);
     wrap.appendChild(rootRow);
 
@@ -184,8 +234,7 @@ const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?att
       while (sel.options.length > 1) sel.remove(1);
 
       const q = parentOid ? `&parent_id=${parentOid}` : '';
-      const url = `${API_CHILDREN}?attribute_id=${attrId}${q}`;
-      const res = await fetchJSON(url);
+      const res = await fetchJSON(`${API_CHILDREN}?attribute_id=${attrId}${q}`);
       const ops = (res && res.ok) ? (res.data || []) : [];
 
       ops.forEach(o=>{
@@ -198,7 +247,7 @@ const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?att
       if (preOid && ops.some(o=>Number(o.id)===Number(preOid))){
         sel.value = String(preOid);
         txt.style.display = '';
-        txt.value = preText || '';        // ← 回显该级文本
+        txt.value = preText || '';
       } else {
         sel.value = '';
         txt.style.display = 'none';
@@ -221,7 +270,6 @@ const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?att
         if (v){
           chain[levelIndex] = v;
           txt.style.display = '';
-          // 下一层无预填文本
           await loadLevel(levelIndex + 1, v, null, '');
           if (levelsBox.children[levelIndex+1]){
             bindChange(levelIndex+1);
@@ -260,4 +308,96 @@ const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?att
 })();
 </script>
 
+<!-- ===================== 端口级：单属性树级联渲染 ===================== -->
+<script>
+(async function(){
+  const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}";
+  async function j(url){const r=await fetch(url);return await r.json();}
+
+  document.querySelectorAll('.port-cascade').forEach(async (holder)=>{
+    const portId = Number(holder.dataset.port);
+    const attrId = Number(holder.dataset.attr);
+    const base   = holder.dataset.base;
+    const chain  = JSON.parse(holder.dataset.chain || "[]");
+    const rootText = JSON.parse(holder.dataset.root || '""');
+    const levelTexts = JSON.parse(holder.dataset.levels || "[]");
+
+    // 容器
+    const wrap = document.createElement('div');
+    holder.replaceWith(wrap);
+
+    const title = document.createElement('h4');
+    title.textContent = `端口级联：${base}`;
+    wrap.appendChild(title);
+
+    // 隐藏链
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = `port_${portId}_group_${base}_chain`;
+    hidden.value = chain.join(',');
+    wrap.appendChild(hidden);
+
+    // 根文本
+    const rootRow = document.createElement('div');
+    rootRow.style.display='flex'; rootRow.style.gap='8px'; rootRow.style.margin='6px 0';
+    const lab = document.createElement('div'); lab.style.width='120px'; lab.style.color='#666'; lab.textContent='根级取值';
+    rootRow.appendChild(lab);
+    const rootInput = document.createElement('input');
+    rootInput.type='text'; rootInput.style.minWidth='240px';
+    rootInput.name = `port_${portId}_attr_${attrId}_text_root`;
+    rootInput.value = rootText || '';
+    rootRow.appendChild(rootInput);
+    wrap.appendChild(rootRow);
+
+    const box = document.createElement('div'); box.style.display='flex'; box.style.flexDirection='column'; box.style.gap='8px';
+    wrap.appendChild(box);
+
+    function updateHidden(vals){ hidden.value = vals.filter(Boolean).join(','); }
+
+    async function loadLevel(idx, parentOid, preOid, preText){
+      while (box.children.length <= idx){
+        const row = document.createElement('div');
+        row.style.display='flex'; row.style.gap='8px'; row.style.alignItems='center';
+        const lab = document.createElement('div'); lab.style.width='120px'; lab.style.color='#666'; lab.textContent=`第 ${idx+1} 级`;
+        const sel = document.createElement('select'); sel.style.minWidth='200px';
+        sel.innerHTML = `<option value="">（空）</option>`;
+        const txt = document.createElement('input'); txt.type='text'; txt.style.minWidth='240px'; txt.style.display='none';
+        txt.name = `port_${portId}_attr_${attrId}_text_${idx}`;
+        row.append(lab, sel, txt); box.appendChild(row);
+      }
+      const row = box.children[idx], sel=row.children[1], txt=row.children[2];
+      while (sel.options.length>1) sel.remove(1);
+      const q = parentOid ? `&parent_id=${parentOid}` : '';
+      const res = await j(`${API_CHILDREN}?attribute_id=${attrId}${q}`);
+      const ops = (res&&res.ok)?(res.data||[]):[];
+      ops.forEach(o=>{ const opt=document.createElement('option'); opt.value=String(o.id); opt.textContent=o.name; sel.appendChild(opt); });
+      if (preOid && ops.some(o=>Number(o.id)===Number(preOid))){ sel.value=String(preOid); txt.style.display=''; txt.value=preText||''; }
+      else { sel.value=''; txt.style.display='none'; txt.value=''; }
+      while (box.children.length>idx+1) box.removeChild(box.lastChild);
+    }
+
+    function bind(idx, chainVals){
+      const row = box.children[idx], sel=row.children[1], txt=row.children[2];
+      sel.addEventListener('change', async ()=>{
+        chainVals = chainVals.slice(0, idx);
+        const v = sel.value ? Number(sel.value) : null;
+        if (v){ chainVals[idx]=v; txt.style.display=''; await loadLevel(idx+1, v, null, ''); if (box.children[idx+1]) bind(idx+1, chainVals); }
+        else { txt.style.display='none'; txt.value=''; while (box.children.length>idx+1) box.removeChild(box.lastChild); }
+        updateHidden(chainVals);
+      });
+    }
+
+    // 初始化
+    let parent = null, vals = chain.slice();
+    for (let i=0; i<=chain.length; i++){
+      const preOid = chain[i] || null;
+      const preText = (i<levelTexts.length)?(levelTexts[i]||''):'';
+      await loadLevel(i, parent, preOid, preText);
+      bind(i, vals);
+      if (preOid) parent = preOid; else break;
+    }
+    updateHidden(vals);
+  });
+})();
+</script>
 {% endblock %}

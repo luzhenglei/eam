@@ -1,0 +1,51 @@
+from flask import Blueprint, render_template, request, redirect, url_for, flash
+from services.template_service import list_templates  
+from services.device_service import (
+    list_port_templates,
+    create_port_template,
+    delete_port_template,
+)
+
+tpl_bp = Blueprint("tpl_bp", __name__, url_prefix="/templates")
+
+
+@tpl_bp.route("/")
+def templates_home():
+    # 简单列出模板（已有页面也行）
+    templates = list_templates()
+    return render_template("templates_list.html", templates=templates)
+
+
+@tpl_bp.route("/<int:template_id>/port-templates", methods=["GET", "POST"])
+def port_tpl_manage(template_id):
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        name = (request.form.get("name") or "").strip()
+        qty = request.form.get("qty", type=int) or 1
+        naming_rule = (request.form.get("naming_rule") or "").strip() or None
+        sort_order = request.form.get("sort_order", type=int) or 0
+
+        if not code or (qty <= 1 and not name and not naming_rule):
+            flash("请至少填写 code；若 qty=1，需要填写 name 或 naming_rule", "error")
+        else:
+            try:
+                create_port_template(template_id, code, name, qty, naming_rule, sort_order)
+                flash("已新增端口规则", "success")
+            except Exception as e:
+                flash(f"新增失败：{e}", "error")
+
+        return redirect(url_for("tpl_bp.port_tpl_manage", template_id=template_id))
+
+    rows = list_port_templates(template_id)
+    return render_template("port_template_manage.html", template_id=template_id, rows=rows)
+
+
+@tpl_bp.route("/port-templates/<int:pt_id>/delete", methods=["POST"])
+def port_tpl_delete(pt_id):
+    try:
+        delete_port_template(pt_id)
+        flash("已删除端口规则", "success")
+    except Exception as e:
+        flash(f"删除失败：{e}", "error")
+    # 简单返回模板主页；也可以从表单带回 template_id
+    return redirect(url_for("tpl_bp.templates_home"))

@@ -7,6 +7,7 @@ from blueprints.templates import bp_templates
 from blueprints.attributes import bp_attrs
 from blueprints.templates_admin import bp_templates_admin
 from blueprints.devices import bp_devices
+from blueprints.port_template import tpl_bp
 
 
 def create_app():
@@ -18,6 +19,7 @@ def create_app():
     app.register_blueprint(bp_attrs)
     app.register_blueprint(bp_templates_admin)
     app.register_blueprint(bp_devices)
+    app.register_blueprint(tpl_bp)
     return app
 
 app = create_app()

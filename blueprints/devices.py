@@ -50,6 +50,10 @@ def edit_attrs(device_id):
         flash("设备不存在", "error")
         return redirect(url_for("devices_bp.list_page"))
 
+    from services.device_service import _ensure_ports_for_device
+    _ensure_ports_for_device(device["template_id"], device_id)
+
+    # 再取页面模型（这里会读 port 表，得到端口区块）
     form_model = get_template_attrs_for_form(device["template_id"], device_id)
 
     if request.method == "POST":

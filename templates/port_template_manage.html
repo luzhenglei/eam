@@ -1,0 +1,71 @@
+{% extends "layout.html" %}
+{% block title %}模板端口规则管理 · #{{ template_id }}{% endblock %}
+{% block content %}
+<h2>模板端口规则管理 · 模板ID {{ template_id }}</h2>
+
+<form method="post" style="margin:12px 0; padding:12px; border:1px solid #eee; border-radius:8px;">
+  <div style="display:grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap:12px;">
+    <div>
+      <label>code</label>
+      <input type="text" name="code" placeholder="如 LAN / GE" required>
+    </div>
+    <div>
+      <label>name</label>
+      <input type="text" name="name" placeholder="单个端口名（如 lan1）">
+    </div>
+    <div>
+      <label>qty</label>
+      <input type="number" name="qty" min="1" value="1">
+    </div>
+    <div>
+      <label>naming_rule</label>
+      <input type="text" name="naming_rule" placeholder="如 GE0/0/{i} 或 lan{i}">
+    </div>
+    <div>
+      <label>sort_order</label>
+      <input type="number" name="sort_order" value="0">
+    </div>
+  </div>
+  <p class="muted" style="margin-top:6px;">说明：单个端口：qty=1 且填 name；批量：qty&gt;1，建议用 naming_rule（{i} 为序号占位）。</p>
+  <div style="margin-top:8px;">
+    <button class="btn primary" type="submit">新增规则</button>
+    <a class="btn" href="{{ url_for('tpl_bp.templates_home') }}">返回模板列表</a>
+  </div>
+</form>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th style="width:60px;">ID</th>
+      <th>code</th>
+      <th>name</th>
+      <th>qty</th>
+      <th>naming_rule</th>
+      <th>sort</th>
+      <th style="width:120px;">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.qty }}</td>
+        <td>{{ r.naming_rule or '' }}</td>
+        <td>{{ r.sort_order }}</td>
+        <td>
+          <form method="post" action="{{ url_for('tpl_bp.port_tpl_delete', pt_id=r.id) }}" onsubmit="return confirm('确认删除？')">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}
+      <tr><td colspan="7" class="muted">暂无规则</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<p class="muted">提示：进入某台设备的“编辑属性”页时，若该设备还没有端口，将按这里的规则自动生成端口实例。</p>
+{% endblock %}
