@@ -5,6 +5,10 @@ from services.device_service import (
     get_template_attrs_for_form,
     save_device_attributes,
     create_device_basic,  # 用于新增设备
+    delete_device,
+    update_device_basic,  # 用于更新设备
+    _ensure_ports_for_device,  # 
+    get_device_preview_data,
 )
 from services.template_service import list_templates
 from services.option_service import list_children
@@ -17,12 +21,17 @@ def list_page():
     rows = list_devices()
     return render_template("devices_list.html", rows=rows)
 
+@bp_devices.route("/<int:device_id>/preview", methods=["GET"])
+def preview_page(device_id):
+    try:
+        data = get_device_preview_data(device_id)
+    except Exception as e:
+        flash(f"预览失败：{e}", "err")
+        return redirect(url_for("devices_bp.list_page"))
+    return render_template("device_preview.html", data=data)
 
 @bp_devices.route("/new", methods=["GET", "POST"])
 def new_device():
-    """
-    补回“新增设备”路由，避免页面中 url_for('devices_bp.new_device') 报 BuildError。
-    """
     templates = list_templates()
     if request.method == "POST":
         template_id = request.form.get("template_id", type=int)
@@ -42,66 +51,86 @@ def new_device():
 
     return render_template("device_new.html", templates=templates)
 
-
-@bp_devices.route("/<int:device_id>/attrs", methods=["GET", "POST"])
-def edit_attrs(device_id):
+@bp_devices.route("/<int:device_id>/edit", methods=["GET", "POST"])
+def edit_device(device_id):
+    """
+    编辑设备基本信息（名称、型号、模板）
+    GET：渲染编辑表单（自己已有 UI 的话可复用；这里不提供模板代码）
+    POST：提交更新；若切模板，联动清理并重建端口实例
+    """
     device = get_device(device_id)
     if not device:
         flash("设备不存在", "error")
         return redirect(url_for("devices_bp.list_page"))
 
-    from services.device_service import _ensure_ports_for_device
-    _ensure_ports_for_device(device["template_id"], device_id)
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        model_code = (request.form.get("model_code") or "").strip()
+        new_template_id = request.form.get("template_id", type=int)
+        if not name or not model_code:
+            flash("名称与型号必填", "error")
+            return redirect(url_for("devices_bp.edit_device", device_id=device_id))
 
-    # 再取页面模型（这里会读 port 表，得到端口区块）
-    form_model = get_template_attrs_for_form(device["template_id"], device_id)
+        try:
+            update_device_basic(device_id, name, model_code, new_template_id)
+            flash("设备已更新", "success")
+            return redirect(url_for("devices_bp.list_page"))
+        except Exception as e:
+            flash(f"更新失败：{e}", "error")
+            return redirect(url_for("devices_bp.edit_device", device_id=device_id))
+
+    # GET：需要模板列表供选择
+    templates = list_templates()
+    return render_template("device_edit.html", device=device, templates=templates)
+
+
+@bp_devices.route("/<int:device_id>/delete", methods=["POST"])
+def delete_device_route(device_id):
+    """
+    删除设备（POST 提交）
+    """
+    try:
+        delete_device(device_id)
+        flash("设备已删除", "success")
+    except Exception as e:
+        flash(f"删除失败：{e}", "error")
+    return redirect(url_for("devices_bp.list_page"))
+
+@bp_devices.route("/<int:device_id>/attrs", methods=["GET", "POST"])
+def edit_attrs(device_id):
+    # 1) 取设备 & 模板
+    device = get_device(device_id)
+    if not device:
+        flash("设备不存在", "err")
+        return redirect(url_for("devices_bp.list_page"))
+    template_id = device.get("template_id")
+    if not template_id:
+        flash("该设备未绑定模板，无法编辑属性", "err")
+        return redirect(url_for("devices_bp.edit_page", device_id=device_id))
+
+    try:
+        # 2) 每次进入都进行“端口对账/增量补齐”
+        #    —— 支持你在模板中新加/上调端口规则后，这里自动补齐缺口
+        _ensure_ports_for_device(template_id, device_id)
+    except Exception as e:
+        # 不让同步失败阻断页面，给出提示即可
+        flash(f"端口同步失败：{e}", "err")
 
     if request.method == "POST":
-        # 1) 基于 request.form 构造一个“兼容两种风格”的 payload
-        #    - 保留 attr_{aid}（我们新版 save_device_attributes 使用）
-        #    - 同时构造 payload[aid]["enum_option_ids"]（旧代码路径使用）
-        payload = {}
-
-        # 先把原始 form 的所有键值原封不动放进去（保留 chain、root/text_i、普通输入框等）
-        for k in request.form.keys():
-            vals = request.form.getlist(k)
-            if len(vals) == 1:
-                payload[k] = vals[0]
-            else:
-                payload[k] = vals  # 多选下拉会是 list
-
-        # 兼容层：为 flat_attrs 的枚举型，补出 payload[aid]["enum_option_ids"]
-        for item in form_model.get("flat_attrs", []):
-            aid = item["attribute_id"]
-            dtype = item["data_type"]
-            allow_multi = bool(item["allow_multi"])
-            key = f"attr_{aid}"
-
-            if dtype == "enum":
-                raw = request.form.getlist(key) if allow_multi else [request.form.get(key)]
-                ids = []
-                for v in raw:
-                    if v and str(v).strip().isdigit():
-                        ids.append(int(v))
-                # 去重
-                ids = list(dict.fromkeys(ids))
-                # 写入兼容结构：payload[aid] = {"enum_option_ids":[...]}
-                payload[aid] = {"enum_option_ids": ids}
-            else:
-                # 非枚举：也补一个 {"value_text": "..."} 以防旧代码读取
-                v = (request.form.get(key) or "").strip()
-                payload[aid] = {"value_text": v}
-
-        # 2) 保存
-        ok, msg = save_device_attributes(device_id, form_model, payload)
-        if not ok:
-            flash(msg or "保存失败", "error")
-        else:
-            flash("保存成功", "success")
+        # 3) 保存属性（使用“对账后”的表单模型）
+        form_model = get_template_attrs_for_form(template_id, device_id)
+        ok, msg = save_device_attributes(device_id, form_model, request.form)
+        if ok:
+            flash("已保存属性", "ok")
             return redirect(url_for("devices_bp.list_page"))
+        else:
+            flash(msg or "保存失败", "err")
+            # 失败时回显同一页
+            return render_template("device_attrs_form.html", device=device, attrs=form_model)
 
+    # 4) GET：渲染（使用“对账后”的模型，含最新端口）
+    form_model = get_template_attrs_for_form(template_id, device_id)
     return render_template("device_attrs_form.html", device=device, attrs=form_model)
-
 
 # --------- AJAX API：按父子关系返回直接子项 ---------
 @bp_devices.route("/options-children")

@@ -1,0 +1,45 @@
+{% extends "layout.html" %}
+{% block title %}编辑设备 · {{ device.name }}{% endblock %}
+{% block content %}
+<h2>编辑设备 · {{ device.name }}</h2>
+
+<div class="muted" style="margin:8px 0 16px;">
+  提示：切换模板会清空本设备已有的“设备属性、端口实例及端口属性值”，并按新模板自动生成端口。
+</div>
+
+<form method="post">
+  <div class="grid-2">
+    <div>
+      <label>设备编号</label>
+      <input type="text" name="name" required value="{{ device.name }}" placeholder="例如：SB011">
+    </div>
+
+    <div>
+      <label>设备型号</label>
+      <input type="text" name="model_code" required value="{{ device.model_code or '' }}" placeholder="例如：UNO-2372G">
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-top:8px;">
+    <div>
+      <label>模板</label>
+      <select name="template_id" required>
+        {% for t in templates %}
+          <option value="{{ t.id }}" {{ 'selected' if t.id == device.template_id else '' }}>
+            {{ t.id }} - {{ t.name }}{% if t.device_type %} ({{ t.device_type }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <!-- 预留：可放备注等 -->
+    </div>
+  </div>
+
+  <div class="actions" style="margin-top:16px;">
+    <button class="btn primary" type="submit">保存修改</button>
+    <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回列表</a>
+    <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=device.id) }}">去编辑属性</a>
+  </div>
+</form>
+{% endblock %}

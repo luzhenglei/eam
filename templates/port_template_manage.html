@@ -4,29 +4,34 @@
 <h2>模板端口规则管理 · 模板ID {{ template_id }}</h2>
 
 <form method="post" style="margin:12px 0; padding:12px; border:1px solid #eee; border-radius:8px;">
-  <div style="display:grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap:12px;">
+  <!-- 4 列：标签 / 属性 / 端口类型 / 数量（全部必填） -->
+  <div style="display:grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap:12px;">
     <div>
-      <label>code</label>
-      <input type="text" name="code" placeholder="如 LAN / GE" required>
+      <label>标签 <span style="color:#d33">*</span></label>
+      <input type="text" name="code" placeholder="如 PW / GE / SFP" required>
     </div>
     <div>
-      <label>name</label>
-      <input type="text" name="name" placeholder="单个端口名（如 lan1）">
+      <label>属性 <span style="color:#d33">*</span></label>
+      <input type="text" name="name" placeholder="例如：AC24V" required>
     </div>
     <div>
-      <label>qty</label>
-      <input type="number" name="qty" min="1" value="1">
+      <label>端口类型 <span style="color:#d33">*</span></label>
+      <select name="port_type_id" required>
+        <option value="" disabled selected>（请选择）</option>
+        {% for t in port_types %}
+          <option value="{{ t.id }}">{{ t.name }}{% if t.code %} ({{ t.code }}){% endif %}</option>
+        {% endfor %}
+      </select>
     </div>
     <div>
-      <label>naming_rule</label>
-      <input type="text" name="naming_rule" placeholder="如 GE0/0/{i} 或 lan{i}">
-    </div>
-    <div>
-      <label>sort_order</label>
-      <input type="number" name="sort_order" value="0">
+      <label>数量 <span style="color:#d33">*</span></label>
+      <input type="number" name="qty" min="1" value="1" required>
     </div>
   </div>
-  <p class="muted" style="margin-top:6px;">说明：单个端口：qty=1 且填 name；批量：qty&gt;1，建议用 naming_rule（{i} 为序号占位）。</p>
+  <p class="muted" style="margin-top:6px;">
+    生成规则：按“<code>标签 + 序号</code>”生成端口名；例如 标签=PW，数量=4 → 生成
+    <code>PW1</code>、<code>PW2</code>、<code>PW3</code>、<code>PW4</code>。数量=1 时生成 <code>PW1</code>。
+  </p>
   <div style="margin-top:8px;">
     <button class="btn primary" type="submit">新增规则</button>
     <a class="btn" href="{{ url_for('tpl_bp.templates_home') }}">返回模板列表</a>
@@ -37,11 +42,10 @@
   <thead>
     <tr>
       <th style="width:60px;">ID</th>
-      <th>code</th>
-      <th>name</th>
-      <th>qty</th>
-      <th>naming_rule</th>
-      <th>sort</th>
+      <th>标签</th>
+      <th>属性</th>
+      <th>端口类型</th>
+      <th>数量</th>
       <th style="width:120px;">操作</th>
     </tr>
   </thead>
@@ -51,9 +55,8 @@
         <td>{{ r.id }}</td>
         <td>{{ r.code }}</td>
         <td>{{ r.name }}</td>
+        <td>{{ r.port_type_name or '' }}</td>
         <td>{{ r.qty }}</td>
-        <td>{{ r.naming_rule or '' }}</td>
-        <td>{{ r.sort_order }}</td>
         <td>
           <form method="post" action="{{ url_for('tpl_bp.port_tpl_delete', pt_id=r.id) }}" onsubmit="return confirm('确认删除？')">
             <button class="btn danger" type="submit">删除</button>
@@ -62,10 +65,34 @@
       </tr>
     {% endfor %}
     {% if not rows %}
-      <tr><td colspan="7" class="muted">暂无规则</td></tr>
+      <tr><td colspan="6" class="muted">暂无规则</td></tr>
     {% endif %}
   </tbody>
 </table>
 
-<p class="muted">提示：进入某台设备的“编辑属性”页时，若该设备还没有端口，将按这里的规则自动生成端口实例。</p>
+<h3 style="margin-top:16px;">预览：本模板将生成的端口</h3>
+<ul class="tree">
+  {% for r in rows %}
+    <li>
+      <strong>{{ r.code }}</strong>
+      {% if r.port_type_name %}<span class="muted"> · {{ r.port_type_name }}</span>{% endif %}
+      <ul>
+        {% set qty = (r.qty|int if r.qty is not none else 1) %}
+        {% set base = (r.code or '') %}
+        {% if qty < 1 %}
+          <li class="muted">数量无效（应 ≥ 1）</li>
+        {% else %}
+          {% for i in range(1, qty + 1) %}
+            <li>{{ base ~ i }}</li>
+          {% endfor %}
+        {% endif %}
+      </ul>
+    </li>
+  {% endfor %}
+  {% if not rows %}
+    <li class="muted">暂无可预览端口</li>
+  {% endif %}
+</ul>
+
+<p class="muted">提示：进入设备“编辑属性”时会按上述规则增量补齐端口（不会删除已有端口）。</p>
 {% endblock %}

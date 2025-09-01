@@ -1,7 +1,8 @@
 # services/device_service.py
 import re
 from db import get_conn
-from services.option_service import list_options  # 用于枚举属性构建 options 列表
+from typing import Dict, List
+from services.option_service import list_options
 
 # -------- 设备基础 --------
 
@@ -29,6 +30,98 @@ def get_device(device_id: int):
         with conn.cursor() as cur:
             cur.execute(sql, (device_id,))
             return cur.fetchone()
+
+def update_device_basic(device_id: int, name: str, model_code: str, new_template_id: int = None):
+    """
+    修改设备基本信息；
+    - 仅改名称/型号：更新 device 表即可；
+    - 若切换模板：需要清理设备/端口的属性值与端口实例，再按新模板重建端口实例。
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 查询当前模板
+            cur.execute("SELECT template_id FROM device WHERE id=%s", (device_id,))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("设备不存在")
+            old_template_id = row["template_id"]
+
+            # 先更新名称/型号
+            cur.execute("UPDATE device SET name=%s, model_code=%s WHERE id=%s",
+                        (name, model_code, device_id))
+
+            # 若不换模板，结束
+            if new_template_id is None or int(new_template_id) == int(old_template_id):
+                return True
+
+            # 切换模板：清理旧数据
+            # 1) 清设备属性值
+            cur.execute("DELETE FROM device_attr_value WHERE device_id=%s", (device_id,))
+            # 2) 找出端口
+            cur.execute("SELECT id FROM port WHERE device_id=%s", (device_id,))
+            port_rows = cur.fetchall()
+            port_ids = [r["id"] for r in port_rows] if port_rows else []
+            if port_ids:
+                # 2.1) 清端口属性值
+                cur.execute(
+                    "DELETE FROM port_attr_value WHERE port_id IN (%s)" % (
+                        ",".join(["%s"] * len(port_ids))
+                    ),
+                    tuple(port_ids)
+                )
+                # 2.2) 删端口
+                cur.execute(
+                    "DELETE FROM port WHERE id IN (%s)" % (
+                        ",".join(["%s"] * len(port_ids))
+                    ),
+                    tuple(port_ids)
+                )
+
+            # 3) 更新设备模板
+            cur.execute("UPDATE device SET template_id=%s WHERE id=%s",
+                        (new_template_id, device_id))
+
+        # 4) 按新模板生成端口实例
+        _ensure_ports_for_device(new_template_id, device_id)
+
+    return True
+
+
+def delete_device(device_id: int):
+    """
+    删除设备（含：端口属性值 -> 端口 -> 设备属性值 -> 设备）
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 找端口
+            cur.execute("SELECT id FROM port WHERE device_id=%s", (device_id,))
+            port_rows = cur.fetchall()
+            port_ids = [r["id"] for r in port_rows] if port_rows else []
+
+            if port_ids:
+                # 先删端口属性值
+                cur.execute(
+                    "DELETE FROM port_attr_value WHERE port_id IN (%s)" % (
+                        ",".join(["%s"] * len(port_ids))
+                    ),
+                    tuple(port_ids)
+                )
+                # 再删端口
+                cur.execute(
+                    "DELETE FROM port WHERE id IN (%s)" % (
+                        ",".join(["%s"] * len(port_ids))
+                    ),
+                    tuple(port_ids)
+                )
+
+            # 删设备属性值
+            cur.execute("DELETE FROM device_attr_value WHERE device_id=%s", (device_id,))
+
+            # 删设备
+            cur.execute("DELETE FROM device WHERE id=%s", (device_id,))
+
+    return True
+
 
 def create_device_basic(template_id: int, name: str, model_code: str):
     sql = "INSERT INTO device (template_id, name, model_code) VALUES (%s, %s, %s)"
@@ -101,7 +194,7 @@ def _get_current_values(device_id: int):
 
 def _base_code(code: str):
     """
-    把 device.category / device.category1 / device.category2 ... 统一归到 base 'device.category'
+    把 device.category / device.category2 ... 统一归到 base 'device.category'
     规则：去掉末尾的连续数字。
     """
     if code is None:
@@ -169,10 +262,9 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
         else:
             item["options"] = []
         item["current"] = current.get(item["attribute_id"], {"enum_option_ids": [], "value_text": ""})
-        # 容错：某些库 is_required 可能为 NULL
+        # 容错
         if item.get("is_required") is None:
             item["is_required"] = 0
-        # 容错：allow_multi 缺失时按 0 处理
         if item.get("allow_multi") is None:
             item["allow_multi"] = 0
 
@@ -460,7 +552,8 @@ def save_device_attributes(device_id: int, form_model: dict, payload: dict):
                         "VALUES (%s,%s,%s,%s)",
                         (device_id, attr_id, oid, txt_val)
                     )
-                        # -------- 端口侧保存（与设备“单属性树/普通属性”同思路，但带 port_id 前缀） --------
+
+            # -------- 端口侧保存（与设备“单属性树/普通属性”同思路，但带 port_id 前缀） --------
             for p in form_model.get("ports", []):
                 port_id = p["port"]["id"]
 
@@ -537,74 +630,145 @@ def save_device_attributes(device_id: int, form_model: dict, payload: dict):
                             (port_id, attr_id, oid, txt_val)
                         )
 
-
     return True, ""
 
 def _ensure_ports_for_device(template_id: int, device_id: int):
     """
-    若该设备还没有任何端口，则根据 port_template 为其生成端口实例。
-    - 支持 qty=1 的单个端口
-    - 支持 naming_rule 批量生成，如 'GE0/0/{i}'
+    将设备端口与模板端口规则进行“增量同步”：
+      - 模板无规则：不生成
+      - 对每条规则：
+          * 标签不空：目标是 标签+1..标签+qty
+            - 统计设备中已有 ^标签(\d+)$ 的最大序号与数量，若不足则从 (max+1) 开始补齐到 qty
+          * 标签为空：目标是 纯数字 1..qty（所有空标签规则共用一条递增序列）
+            - 统计设备中已有 ^(\d+)$ 的最大序号与数量，按总量缺多少补多少（共享序列）
+      - 不删除、不改名，只有“缺口补齐”
     """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # 已有端口？
-            cur.execute("SELECT COUNT(*) AS c FROM port WHERE device_id=%s", (device_id,))
-            exists = cur.fetchone()["c"]
-            if exists and exists > 0:
-                return  # 已存在则不重复生成
-
-            # 取模板端口规则
-            cur.execute("""
-                SELECT id, code, name, qty, naming_rule
-                FROM port_template
-                WHERE template_id=%s
-                ORDER BY sort_order, id
-            """, (template_id,))
-            rules = cur.fetchall()
-            if not rules:
-                return
-
-            # 生成端口
-            for r in rules:
-                qty = int(r["qty"] or 1)
-                rule = (r["naming_rule"] or "").strip()
-                base_name = (r["name"] or "").strip()
-
-                if qty <= 1 and base_name:
-                    cur.execute("INSERT INTO port (device_id, name) VALUES (%s, %s)", (device_id, base_name))
-                elif qty > 1:
-                    for i in range(1, qty + 1):
-                        if rule:
-                            nm = rule.replace("{i}", str(i))
-                        else:
-                            nm = f"{base_name}{i}" if base_name else f"port{i}"
-                        cur.execute("INSERT INTO port (device_id, name) VALUES (%s, %s)", (device_id, nm))
-                else:
-                    # 兜底
-                    cur.execute("INSERT INTO port (device_id, name) VALUES (%s, %s)", (device_id, f"port-{r['id']}"))
-
-            # 提交
-            conn.commit()
-            
-# === port_template CRUD ===
-
-def list_port_templates(template_id: int):
     with get_conn() as conn, conn.cursor() as cur:
+        # 取模板规则
         cur.execute("""
-            SELECT id, template_id, code, name, qty, naming_rule, sort_order
+            SELECT id, code, qty, port_type_id
             FROM port_template
             WHERE template_id=%s
             ORDER BY sort_order, id
         """, (template_id,))
+        rules = cur.fetchall() or []
+        if not rules:
+            return  # 无规则不生成
+
+        # 读取设备现有端口（名字集合 + 为前缀/纯数字准备的统计）
+        cur.execute("SELECT name FROM port WHERE device_id=%s", (device_id,))
+        existing = [ (r["name"] or "").strip() for r in (cur.fetchall() or []) ]
+        used_names = set(existing)
+
+        # 预统计：各前缀当前最大序号、纯数字当前最大序号，以及当前计数
+        prefix_max = {}   # 非空标签：code -> max_num
+        prefix_count = {} # 非空标签：code -> count( ^code\d+$ )
+        numeric_max = 0   # 空标签共享：max of ^\d+$
+        numeric_count = 0 # 空标签共享：count of ^\d+$
+
+        # 扫一遍现有名字，统计
+        num_pat = re.compile(r'^(\d+)$')
+        def make_pat(code): return re.compile(rf'^{re.escape(code)}(\d+)$')
+
+        # 为减少正则编译，多收集规则里的非空 code
+        nonempty_codes = [ (r.get("code") or "").strip() for r in rules if (r.get("code") or "").strip() ]
+        nonempty_codes = list(dict.fromkeys(nonempty_codes))  # 去重保持顺序
+        code_pats = { c: make_pat(c) for c in nonempty_codes }
+
+        for nm in existing:
+            m_num = num_pat.match(nm)
+            if m_num:
+                n = int(m_num.group(1))
+                numeric_max = max(numeric_max, n)
+                numeric_count += 1
+                continue
+            # 尝试匹配各前缀
+            for code, pat in code_pats.items():
+                m = pat.match(nm)
+                if m:
+                    n = int(m.group(1))
+                    prefix_max[code] = max(prefix_max.get(code, 0), n)
+                    prefix_count[code] = prefix_count.get(code, 0) + 1
+                    break
+
+        # 先处理“非空标签”的规则：各自补齐到 qty
+        for r in rules:
+            code = (r.get("code") or "").strip()
+            qty  = int(r.get("qty") or 1)
+            if qty < 1:
+                continue
+            if code:
+                have = prefix_count.get(code, 0)
+                need = max(0, qty - have)
+                if need == 0:
+                    continue
+                start = prefix_max.get(code, 0) + 1
+                ptype = r.get("port_type_id")
+                # 补 need 个
+                for i in range(need):
+                    nm = f"{code}{start+i}"
+                    # 极端保障：同事务内避重
+                    while nm in used_names:
+                        start += 1
+                        nm = f"{code}{start+i}"
+                    if ptype:
+                        cur.execute(
+                            "INSERT INTO port (device_id, name, port_type_id) VALUES (%s, %s, %s)",
+                            (device_id, nm, ptype)
+                        )
+                    else:
+                        cur.execute(
+                            "INSERT INTO port (device_id, name) VALUES (%s, %s)",
+                            (device_id, nm)
+                        )
+                    used_names.add(nm)
+                # 更新统计缓存
+                prefix_count[code] = have + need
+                prefix_max[code] = start + need - 1
+
+        # 再处理“空标签”的规则：共享纯数字序列，按总量补齐到 sum(qty)
+        total_empty_qty = sum(int(r.get("qty") or 1) for r in rules if not (r.get("code") or "").strip())
+        need_empty = max(0, total_empty_qty - numeric_count)
+        if need_empty > 0:
+            start = numeric_max + 1
+            for i in range(need_empty):
+                nm = f"{start+i}"
+                while nm in used_names:
+                    start += 1
+                    nm = f"{start+i}"
+                cur.execute(
+                    "INSERT INTO port (device_id, name) VALUES (%s, %s)",
+                    (device_id, nm)
+                )
+                used_names.add(nm)
+
+        conn.commit()
+          
+# === port_template CRUD ===
+
+def list_port_templates(template_id: int):
+    with get_conn() as conn, conn.cursor() as cur:
+        # 带出 port_type_id 与类型名，方便 UI 展示
+        cur.execute("""
+            SELECT pt.id, pt.template_id, pt.code, pt.name,
+                   pt.port_type_id,
+                   t.name AS port_type_name,
+                   pt.qty, pt.naming_rule, pt.sort_order
+            FROM port_template pt
+            LEFT JOIN port_type t ON t.id = pt.port_type_id
+            WHERE pt.template_id=%s
+            ORDER BY pt.sort_order, pt.id
+        """, (template_id,))
         return cur.fetchall()
 
-def create_port_template(template_id: int, code: str, name: str, qty: int = 1, naming_rule: str = None, sort_order: int = 0):
+def create_port_template(template_id: int, code: str, name: str,
+                         qty: int = 1, naming_rule: str = None,
+                         sort_order: int = 0, port_type_id: int = None):
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO port_template (template_id, code, name, qty, naming_rule, sort_order)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (template_id, code, name, qty, naming_rule, sort_order))
+            INSERT INTO port_template (template_id, code, name, port_type_id, qty, naming_rule, sort_order)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (template_id, code, name, port_type_id, qty, naming_rule, sort_order))
         return cur.lastrowid
 
 def delete_port_template(pt_id: int):
@@ -624,3 +788,137 @@ def _has_option_hierarchy(attribute_id: int) -> bool:
         """, (attribute_id,))
         return cur.fetchone() is not None
 
+
+
+def list_device_ports_with_type(device_id: int):
+    """
+    返回设备端口（含端口类型），用于分组展示。
+    [{'id':1,'name':'PW1','port_type_id':3,'port_type_name':'电源端口'}, ...]
+    """
+    sql = """
+    SELECT p.id, p.name,
+           pt.id  AS port_type_id,
+           pt.name AS port_type_name
+    FROM port p
+    LEFT JOIN port_type pt ON pt.id = p.port_type_id
+    WHERE p.device_id=%s
+    ORDER BY p.id
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (device_id,))
+        return cur.fetchall()
+
+def _option_name_map(attribute_id: int) -> Dict[int, str]:
+    """把某个属性的所有选项做成 {id: name} 的字典，便于展示。"""
+    mapping = {}
+    for op in list_options(attribute_id):
+        mapping[op["id"]] = op["name"]
+    return mapping
+
+
+
+def _option_name_map(attribute_id: int) -> Dict[int, str]:
+    """把某个属性的所有选项做成 {id: name} 的字典，便于展示。"""
+    mapping = {}
+    for op in list_options(attribute_id):
+        mapping[op["id"]] = op["name"]
+    return mapping
+
+def get_device_preview_data(device_id: int):
+    """
+    预览页数据（树状）：
+    - 顶部：设备ID/名称/类型/模板
+    - 设备属性：
+        * 非枚举：name -> value
+        * 级联枚举：name -> 路径（用 › 连接）
+    - 端口（按模板端口规则三层展示）：
+        * 第一层：端口类型（port_type.name，空则“未分类”）
+        * 第二层：属性（port_template.name）
+        * 第三层：按规则生成的“标签+序号”（code1..codeN）
+          —— 这里按规则预览，不依赖已生成实例
+    """
+    device = get_device(device_id)
+    if not device:
+        raise ValueError("设备不存在")
+    template_id = device.get("template_id")
+    if not template_id:
+        raise ValueError("该设备未绑定模板")
+
+    # 复用已有模型拿到属性与当前值
+    model = get_template_attrs_for_form(template_id, device_id)
+
+    # ===== 设备属性：只用“名称”做键 =====
+    flat_items = []
+    for a in model.get("flat_attrs", []):
+        name = a["name"]  # 只展示属性名称
+        dt = a["data_type"]
+        cur = a.get("current", {}) or {}
+        if dt == "enum":
+            ids = cur.get("enum_option_ids") or []
+            if ids:
+                names = [ _option_name_map(a["attribute_id"]).get(i, str(i)) for i in ids ]
+                value = "，".join([n for n in names if n])
+            else:
+                value = ""
+        else:
+            value = cur.get("value_text") or ""
+        flat_items.append({"name": name, "value": value})
+
+    # 级联：name -> 路径（不再出现“第一级/根文本”等字样）
+    cascaded_items = []
+    casc_groups = model.get("cascaded_groups", []) or []
+    if casc_groups:
+        # 查出这些属性的名称
+        aid_list = [ (g.get("tree_attr_id") or g.get("attribute_id")) for g in casc_groups if (g.get("tree_attr_id") or g.get("attribute_id")) ]
+        aid_to_name = {}
+        if aid_list:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name FROM attribute_def WHERE id IN (%s)" % ",".join(["%s"]*len(aid_list)),
+                    tuple(aid_list)
+                )
+                for r in cur.fetchall() or []:
+                    aid_to_name[r["id"]] = r["name"]
+
+        for g in casc_groups:
+            aid = g.get("tree_attr_id") or g.get("attribute_id")
+            if not aid:
+                continue
+            name = aid_to_name.get(aid, "")
+            chain_ids = g.get("selected_chain") or []
+            if chain_ids:
+                name_map = _option_name_map(aid)
+                chain = [ name_map.get(oid, str(oid)) for oid in chain_ids ]
+                path = " › ".join([x for x in chain if x])
+            else:
+                path = ""
+            cascaded_items.append({"name": name, "path": path})
+
+    # ===== 端口：按“模板规则”三层（端口类型 -> 属性 -> 标签+序号） =====
+    rules = list_port_templates(template_id)  # 需返回 id, code, name(属性), qty, port_type_name
+    ports_tree = {}  # {ptype: { attr_name: [ 'PW1','PW2',... ] } }
+    for r in rules:
+        ptype = r.get("port_type_name") or "未分类"
+        attr  = r.get("name") or "（未命名属性）"   # 模板规则中的“属性”字段
+        code  = (r.get("code") or "").strip()
+        qty   = int(r.get("qty") or 1)
+        if qty < 1:  # 容错
+            continue
+        # 第三层：生成 代码+序号，单个也从 1 开始
+        if code:
+            names = [ f"{code}{i}" for i in range(1, qty+1) ]
+        else:
+            # 若标签允许为空，按纯数字预览
+            names = [ f"{i}" for i in range(1, qty+1) ]
+        ports_tree.setdefault(ptype, {}).setdefault(attr, []).extend(names)
+
+    return {
+        "device": {
+            "id": device["id"],
+            "name": device["name"],
+            "device_type": device.get("device_type") or "",
+            "template_name": device.get("template_name") or "",
+        },
+        "device_attrs": {"flat": flat_items, "cascaded": cascaded_items},
+        "ports_tree": ports_tree
+    }

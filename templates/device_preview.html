@@ -1,0 +1,62 @@
+{% extends "layout.html" %}
+{% block title %}设备预览 · {{ data.device.name }}{% endblock %}
+{% block content %}
+<h2>设备预览</h2>
+<p class="muted">
+  设备：#{{ data.device.id }}（{{ data.device.name }}）
+  ｜ 设备类型：{{ data.device.device_type or '—' }}
+  ｜ 模板：{{ data.device.template_name or '—' }}
+</p>
+
+<h3>设备属性</h3>
+<ul class="tree">
+  {% for it in data.device_attrs.flat %}
+    <li><strong>{{ it.name }}</strong>：{{ it.value or '—' }}</li>
+  {% endfor %}
+  {% for it in data.device_attrs.cascaded %}
+    <li><strong>{{ it.name }}</strong>：{{ it.path or '—' }}</li>
+  {% endfor %}
+  {% if (not data.device_attrs.flat) and (not data.device_attrs.cascaded) %}
+    <li class="muted">无属性</li>
+  {% endif %}
+</ul>
+
+<h3 style="margin-top:16px;">端口</h3>
+<ul class="tree">
+  {% for ptype, attrs in data.ports_tree.items() %}
+    <li>
+      <strong>{{ ptype }}</strong>
+      <ul>
+        {% for attr_name, portnames in attrs.items() %}
+          <li>
+            <span>{{ attr_name }}</span>
+            <ul>
+              {% for nm in portnames %}
+                <li><code>{{ nm }}</code></li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
+        {% if not attrs %}
+          <li class="muted">无该类型端口</li>
+        {% endif %}
+      </ul>
+    </li>
+  {% endfor %}
+  {% if not data.ports_tree %}
+    <li class="muted">暂无端口规则</li>
+  {% endif %}
+</ul>
+
+<p style="margin-top:12px;">
+  <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回设备列表</a>
+  <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=data.device.id) }}">去编辑属性</a>
+</p>
+
+<style>
+ul.tree { list-style: none; padding-left: 1em; }
+ul.tree > li { margin: .25em 0; }
+ul.tree li ul { margin-top: .25em; padding-left: 1.2em; border-left: 2px solid #eee; }
+ul.tree code { padding: 0 .25em; background:#f5f5f5; border-radius:4px; }
+</style>
+{% endblock %}

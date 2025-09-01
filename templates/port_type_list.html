@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+{% block title %}端口类型 · 列表{% endblock %}
+{% block content %}
+<h2>端口类型 · 列表</h2>
+
+<p>
+  <a class="btn primary" href="{{ url_for('port_types_bp.new_page') }}">新增端口类型</a>
+  <a class="btn" href="{{ url_for('tpl_bp.templates_home') }}">返回模板</a>
+</p>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th style="width:60px;">ID</th>
+      <th>code</th>
+      <th>name</th>
+      <th style="width:240px;">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.code }}</td>
+        <td>{{ r.name }}</td>
+        <td>
+          <a class="btn" href="{{ url_for('port_types_bp.edit_page', pt_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('port_types_bp.remove', pt_id=r.id) }}" style="display:inline" onsubmit="return confirm('确认删除该类型？');">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}
+      <tr><td colspan="4" class="muted">暂无类型</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

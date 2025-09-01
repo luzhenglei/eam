@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from services.template_service import list_templates  
+from services.port_type_service import list_port_types  
 from services.device_service import (
     list_port_templates,
     create_port_template,
@@ -24,12 +25,13 @@ def port_tpl_manage(template_id):
         qty = request.form.get("qty", type=int) or 1
         naming_rule = (request.form.get("naming_rule") or "").strip() or None
         sort_order = request.form.get("sort_order", type=int) or 0
+        port_type_id = request.form.get("port_type_id", type=int) or None  # 新增
 
         if not code or (qty <= 1 and not name and not naming_rule):
             flash("请至少填写 code；若 qty=1，需要填写 name 或 naming_rule", "error")
         else:
             try:
-                create_port_template(template_id, code, name, qty, naming_rule, sort_order)
+                create_port_template(template_id, code, name, qty, naming_rule, sort_order, port_type_id)  # 传入
                 flash("已新增端口规则", "success")
             except Exception as e:
                 flash(f"新增失败：{e}", "error")
@@ -37,7 +39,8 @@ def port_tpl_manage(template_id):
         return redirect(url_for("tpl_bp.port_tpl_manage", template_id=template_id))
 
     rows = list_port_templates(template_id)
-    return render_template("port_template_manage.html", template_id=template_id, rows=rows)
+    port_types = list_port_types()  # 新增：供下拉选择
+    return render_template("port_template_manage.html", template_id=template_id, rows=rows, port_types=port_types)
 
 
 @tpl_bp.route("/port-templates/<int:pt_id>/delete", methods=["POST"])

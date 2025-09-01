@@ -32,7 +32,7 @@
             <button class="btn danger" type="submit">删除</button>
           </form>
           <a class="btn" href="{{ url_for('templates_bp.bind', template_id=r.id) }}">去绑定属性</a>
-          <a href="{{ url_for('tpl_bp.port_tpl_manage', template_id=r.id) }}">端口规则</a>
+          <a href="{{ url_for('tpl_bp.port_tpl_manage', template_id=r.id) }}">端口生成规则</a>
         </td>
       </tr>
     {% endfor %}

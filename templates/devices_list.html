@@ -2,16 +2,20 @@
 {% block title %}设备管理 · 列表{% endblock %}
 {% block content %}
 <h2>设备管理 · 列表</h2>
-<p><a class="btn primary" href="{{ url_for('devices_bp.new_device') }}">新建设备</a></p>
+
+<p style="margin:8px 0;">
+  <a class="btn primary" href="{{ url_for('devices_bp.new_device') }}">+ 新建设备</a>
+</p>
 
 <table class="table">
   <thead>
     <tr>
-      <th style="width:60px;">ID</th>
-      <th>名称</th>
+      <th style="width:70px;">ID</th>
+      <th>设备编号</th>
+      <th>设备型号</th>
       <th>模板</th>
       <th>类型</th>
-      <th style="width:200px;">操作</th>
+      <th style="width:260px;">操作</th>
     </tr>
   </thead>
   <tbody>
@@ -19,15 +23,22 @@
       <tr>
         <td>{{ r.id }}</td>
         <td>{{ r.name }}</td>
-        <td>{{ r.template_name or '-' }}</td>
-        <td>{{ r.device_type or '-' }}</td>
+        <td>{{ r.model_code or '' }}</td>
+        <td>{{ r.template_name or '' }}{% if r.template_id %} (#{{ r.template_id }}){% endif %}</td>
+        <td>{{ r.device_type or '' }}</td>
         <td>
-          <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=r.id) }}">填写/编辑属性</a>
+          <a class="btn" href="{{ url_for('devices_bp.preview_page', device_id=r.id) }}">预览</a>
+          <a class="btn" href="{{ url_for('devices_bp.edit_device', device_id=r.id) }}">编辑基本信息</a>
+          <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=r.id) }}">编辑属性</a>
+          <form method="post" action="{{ url_for('devices_bp.delete_device_route', device_id=r.id) }}"
+                style="display:inline" onsubmit="return confirm('确定删除该设备？此操作不可撤销。')">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
         </td>
       </tr>
     {% endfor %}
     {% if not rows %}
-      <tr><td colspan="5" class="muted">暂无设备</td></tr>
+      <tr><td colspan="6" class="muted">暂无设备</td></tr>
     {% endif %}
   </tbody>
 </table>
