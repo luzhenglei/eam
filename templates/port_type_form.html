@@ -5,11 +5,11 @@
 
 <form method="post" class="grid-2" style="max-width:600px;">
   <div>
-    <label>code <span style="color:#d33">*</span></label>
+    <label>编码 <span style="color:#d33">*</span></label>
     <input type="text" name="code" value="{{ item.code if item else '' }}" required placeholder="如 RJ45 / SFP / PWR">
   </div>
   <div>
-    <label>name <span style="color:#d33">*</span></label>
+    <label>名称 <span style="color:#d33">*</span></label>
     <input type="text" name="name" value="{{ item.name if item else '' }}" required placeholder="如 电口RJ45 / SFP光口 / 电源端口">
   </div>
   <div style="grid-column:1/3; margin-top:8px;">

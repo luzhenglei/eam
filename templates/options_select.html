@@ -3,7 +3,7 @@
 {% block content %}
 <h2>选择一个属性（可按作用域筛选）</h2>
 <form method="get">
-  <label>作用域 scope：</label>
+  <label>作用域:</label>
   <select name="scope" onchange="this.form.submit()">
     <option value="">全部</option>
     <option value="device" {{ 'selected' if scope=='device' else '' }}>device</option>
@@ -12,7 +12,7 @@
 </form>
 
 <table class="table">
-  <thead><tr><th>ID</th><th>code</th><th>name</th><th>scope</th><th>data_type</th><th>操作</th></tr></thead>
+  <thead><tr><th>序号</th><th>编码</th><th>名称</th><th>作用域</th><th>属性类型</th><th>操作</th></tr></thead>
   <tbody>
     {% for a in attrs %}
       <tr>

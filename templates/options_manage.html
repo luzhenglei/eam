@@ -9,18 +9,18 @@
     <h3>新增选项</h3>
     <form method="post">
       <input type="hidden" name="action" value="create">
-      <label>名称 name</label>
+      <label>名称</label>
       <input type="text" name="name" required>
-      <label>编码 code（可选）</label>
+      <label>编码</label>
       <input type="text" name="code">
-      <label>父节点 parent_id（为空=挂到属性根）</label>
+      <label>父节点（为空=挂到属性根）</label>
       <select name="parent_id">
         <option value="">（挂到属性根）</option>
         {% for r in rows %}
           <option value="{{ r.id }}">{{ r.id }} - {{ r.name }}</option>
         {% endfor %}
       </select>
-      <label>排序 sort_order（整数，越小越靠前）</label>
+      <label>排序（整数，越小越靠前）</label>
       <input type="number" name="sort_order" value="0">
       <div class="actions">
         <button class="btn primary" type="submit">新增</button>

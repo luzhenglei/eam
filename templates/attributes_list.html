@@ -4,17 +4,17 @@
 <h2>属性管理 · 列表</h2>
 
 <form method="get" class="filters">
-  <input type="text" name="q" placeholder="按 code/name 搜索" value="{{ q or '' }}">
+  <input type="text" name="q" placeholder="按 编码/名称 搜索" value="{{ q or '' }}">
   <select name="scope">
     {% for s in scopes %}
-      <option value="{{ s }}" {{ 'selected' if scope==s else '' }}>{{ s or '全部scope' }}</option>
+      <option value="{{ s }}" {{ 'selected' if scope==s else '' }}>{{ s or '作用域' }}</option>
     {% endfor %}
   </select>
-  <select name="data_type">
+  <!-- <select name="data_type">
     {% for t in dtypes %}
       <option value="{{ t }}" {{ 'selected' if data_type==t else '' }}>{{ t or '全部data_type' }}</option>
     {% endfor %}
-  </select>
+  </select> -->
   <select name="page_size">
     {% for n in [10,20,50] %}
       <option value="{{n}}" {{ 'selected' if page_size==n else '' }}>{{n}}/页</option>
@@ -27,7 +27,8 @@
 <table class="table">
   <thead>
     <tr>
-      <th>ID</th><th>code</th><th>name</th><th>scope</th><th>data_type</th><th>allow_multi</th><th>操作</th>
+      <th>ID</th><th>编码</th><th>名称</th><th>作用域</th><th>数据类型</th><th>操作</th>
+      <!-- <th>ID</th><th>编码</th><th>名称</th><th>属性归属</th><th>数据类型</th><th>允许多选</th><th>操作</th> -->
     </tr>
   </thead>
   <tbody>
@@ -38,7 +39,7 @@
         <td>{{ r.name }}</td>
         <td>{{ r.scope }}</td>
         <td>{{ r.data_type }}</td>
-        <td>{{ r.allow_multi }}</td>
+        <!-- <td>{{ r.allow_multi }}</td> -->
         <td>
           <a href="{{ url_for('attributes.edit_page', attr_id=r.id) }}">编辑</a>
           <form method="post" action="{{ url_for('attributes.remove', attr_id=r.id) }}" style="display:inline" onsubmit="return confirm('删除后不可恢复，且可能影响关联，请确认');">

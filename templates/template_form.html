@@ -5,21 +5,21 @@
 <form method="post">
   <div class="grid-2">
     <div>
-      <label>name</label>
+      <label>名称</label>
       <input type="text" name="name" value="{{ item.name if item else '' }}" required>
     </div>
     <div>
-      <label>device_type</label>
+      <label>类型</label>
       <input type="text" name="device_type" value="{{ item.device_type if item else '' }}" required placeholder="Switch / Router / Server ...">
     </div>
   </div>
   <div class="grid-2">
     <div>
-      <label>version</label>
+      <label>版本号</label>
       <input type="number" name="version" value="{{ item.version if item else 1 }}" min="1">
     </div>
     <div>
-      <label><input type="checkbox" name="is_locked" {{ 'checked' if item and item.is_locked else '' }}> is_locked</label>
+      <label><input type="checkbox" name="是否锁定" {{ 'checked' if item and item.is_locked else '' }}> is_locked</label>
     </div>
   </div>
   <div class="actions">
