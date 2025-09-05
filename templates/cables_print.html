@@ -1,0 +1,47 @@
+{% extends "layout.html" %}
+{% block title %}打印预览 · {{ project.name }}{% endblock %}
+{% block content %}
+<h2>打印预览 · 项目：{{ project.name }}</h2>
+<p class="muted">共 {{ items|length }} 条</p>
+<table class="table">
+  <thead>
+    <tr>
+      <th colspan="6">FROM</th>
+      <th colspan="6">TO</th>
+      <th>FROM/TO</th>
+      <th>TO/FROM</th>
+    </tr>
+    <tr>
+      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>方向</th>
+      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>方向</th>
+      <th>FROM/TO</th><th>TO/FROM</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in items %}
+      <tr>
+        <td>{{ project.name }}</td>
+        <td>{{ r.a_device_name }}</td>
+        <td>{{ r.a_port_type_name or '' }}</td>
+        <td>{{ r.a_port_name }}</td>
+        <td>{{ r.a_label }}</td>
+        <td>{{ r.a_dir or '' }}</td>
+
+        <td>{{ project.name }}</td>
+        <td>{{ r.b_device_name }}</td>
+        <td>{{ r.b_port_type_name or '' }}</td>
+        <td>{{ r.b_port_name }}</td>
+        <td>{{ r.b_label }}</td>
+        <td>{{ r.b_dir or '' }}</td>
+
+        <td>{{ r.from_to }}</td>
+        <td>{{ r.to_from }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p style="margin-top:8px;">
+  <button class="btn" onclick="window.print()">打印</button>
+  <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id) }}">返回清册</a>
+</p>
+{% endblock %}

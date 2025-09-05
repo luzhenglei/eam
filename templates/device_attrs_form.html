@@ -116,9 +116,10 @@
   {% endfor %}
 
   <div class="actions" style="margin-top:1rem;">
-    <button class="btn primary" type="submit">保存属性</button>
-    <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回</a>
-  </div>
+  <button class="btn primary" type="submit">保存属性</button>
+  <a class="btn" href="{{ url_for('projects_bp.project_detail', pid=device.project_id) }}">返回</a>
+</div>
+
 </form>
 
 <!-- 设备级级联的模型数据（JSON 注入，避免模板表达式冲突） -->

@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+{% block title %}项目 · 列表{% endblock %}
+{% block content %}
+<h2>项目 · 列表</h2>
+<p><a class="btn primary" href="{{ url_for('projects_bp.project_new') }}">新建项目</a></p>
+<table class="table">
+  <thead><tr><th style="width:60px;">ID</th><th>名称</th><th>备注</th><th>创建时间</th><th style="width:200px;">操作</th></tr></thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td><a href="{{ url_for('projects_bp.project_detail', pid=r.id) }}">{{ r.name }}</a></td>
+        <td>{{ r.remark or '' }}</td>
+        <td>{{ r.created_at }}</td>
+        <td>
+          <form method="post" action="{{ url_for('projects_bp.project_delete', pid=r.id) }}" onsubmit="return confirm('确认删除该项目（级联删除设备与连接）？');" style="display:inline">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+          <a class="btn" href="{{ url_for('connect_bp.connect_page', pid=r.id) }}">连接配置</a>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rows %}<tr><td colspan="5" class="muted">暂无项目</td></tr>{% endif %}
+  </tbody>
+</table>
+{% endblock %}

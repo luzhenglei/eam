@@ -711,16 +711,18 @@ def _ensure_ports_for_device(template_id: int, device_id: int):
                     while nm in used_names:
                         start += 1
                         nm = f"{code}{start+i}"
+                    # 插入端口时：
                     if ptype:
                         cur.execute(
-                            "INSERT INTO port (device_id, name, port_type_id) VALUES (%s, %s, %s)",
-                            (device_id, nm, ptype)
+                        "INSERT INTO port (device_id, name, port_type_id, port_template_id) VALUES (%s, %s, %s, %s)",
+                        (device_id, nm, ptype, r["id"])
                         )
                     else:
                         cur.execute(
-                            "INSERT INTO port (device_id, name) VALUES (%s, %s)",
-                            (device_id, nm)
+                        "INSERT INTO port (device_id, name, port_template_id) VALUES (%s, %s, %s)",
+                        (device_id, nm, r["id"])
                         )
+
                     used_names.add(nm)
                 # 更新统计缓存
                 prefix_count[code] = have + need
@@ -864,11 +866,11 @@ def get_device_preview_data(device_id: int):
             value = cur.get("value_text") or ""
         flat_items.append({"name": name, "value": value})
 
-    # 级联：name -> 路径（不再出现“第一级/根文本”等字样）
+    # --- 设备属性：级联，优先显示文本 ---
     cascaded_items = []
     casc_groups = model.get("cascaded_groups", []) or []
     if casc_groups:
-        # 查出这些属性的名称
+        # 取这些属性的“显示名称”
         aid_list = [ (g.get("tree_attr_id") or g.get("attribute_id")) for g in casc_groups if (g.get("tree_attr_id") or g.get("attribute_id")) ]
         aid_to_name = {}
         if aid_list:
@@ -884,15 +886,23 @@ def get_device_preview_data(device_id: int):
             aid = g.get("tree_attr_id") or g.get("attribute_id")
             if not aid:
                 continue
-            name = aid_to_name.get(aid, "")
+            attr_display_name = aid_to_name.get(aid, "")  # 只用“属性名称”
             chain_ids = g.get("selected_chain") or []
-            if chain_ids:
-                name_map = _option_name_map(aid)
-                chain = [ name_map.get(oid, str(oid)) for oid in chain_ids ]
-                path = " › ".join([x for x in chain if x])
+            texts = g.get("texts") or {}
+            level_texts = (texts.get("levels") or [])
+            root_text = (texts.get("root") or "").strip()
+
+            # 优先用文本：root + levels
+            text_path = [t.strip() for t in ([root_text] + level_texts) if t and t.strip()]
+            if text_path:
+                path = " › ".join(text_path)
             else:
-                path = ""
-            cascaded_items.append({"name": name, "path": path})
+                # 文本为空才退回到选项名
+                name_map = _option_name_map(aid)
+                path = " › ".join([name_map.get(oid, str(oid)) for oid in chain_ids if oid])
+
+            cascaded_items.append({"name": attr_display_name, "path": path})
+
 
     # ===== 端口：按“模板规则”三层（端口类型 -> 属性 -> 标签+序号） =====
     rules = list_port_templates(template_id)  # 需返回 id, code, name(属性), qty, port_type_name
@@ -914,6 +924,7 @@ def get_device_preview_data(device_id: int):
 
     return {
         "device": {
+            "project_id": device.get("project_id"),
             "id": device["id"],
             "name": device["name"],
             "device_type": device.get("device_type") or "",
@@ -922,3 +933,37 @@ def get_device_preview_data(device_id: int):
         "device_attrs": {"flat": flat_items, "cascaded": cascaded_items},
         "ports_tree": ports_tree
     }
+    
+    
+def list_devices_by_project(project_id: int):
+    sql = """
+    SELECT d.id, d.name, d.model_code, d.template_id,
+           dt.name AS template_name, dt.device_type
+    FROM device d
+    LEFT JOIN device_template dt ON dt.id = d.template_id
+    WHERE d.project_id=%s
+    ORDER BY d.id DESC
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (project_id,))
+        return cur.fetchall()
+
+def create_device_in_project(project_id: int, template_id: int, name: str, model_code: str):
+    sql = "INSERT INTO device (project_id, template_id, name, model_code) VALUES (%s, %s, %s, %s)"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (project_id, template_id, name, model_code))
+        return cur.lastrowid
+
+
+def search_devices_in_project(project_id: int, keyword: str):
+    kw = f"%{(keyword or '').strip()}%"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+          SELECT id, name, model_code
+          FROM device
+          WHERE project_id=%s
+            AND (name LIKE %s OR model_code LIKE %s)
+          ORDER BY id DESC
+        """, (project_id, kw, kw))
+        return cur.fetchall()
+

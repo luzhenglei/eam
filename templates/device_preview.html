@@ -49,9 +49,10 @@
 </ul>
 
 <p style="margin-top:12px;">
-  <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回设备列表</a>
+  <a class="btn" href="{{ url_for('projects_bp.project_detail', pid=data.device.project_id) }}">返回</a>
   <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=data.device.id) }}">去编辑属性</a>
 </p>
+
 
 <style>
 ul.tree { list-style: none; padding-left: 1em; }

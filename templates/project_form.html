@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block title %}新建项目{% endblock %}
+{% block content %}
+<h2>新建项目</h2>
+<form method="post" style="max-width:520px;">
+  <div>
+    <label>项目名称</label>
+    <input type="text" name="name" required placeholder="例如：一期机房改造">
+  </div>
+  <div>
+    <label>备注</label>
+    <input type="text" name="remark" placeholder="可选">
+  </div>
+  <div style="margin-top:8px;">
+    <button class="btn primary" type="submit">创建</button>
+    <a class="btn" href="{{ url_for('projects_bp.project_list') }}">返回</a>
+  </div>
+</form>
+{% endblock %}

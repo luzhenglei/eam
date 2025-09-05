@@ -38,8 +38,10 @@
 
   <div class="actions" style="margin-top:16px;">
     <button class="btn primary" type="submit">保存修改</button>
-    <a class="btn" href="{{ url_for('devices_bp.list_page') }}">返回列表</a>
+    <a class="btn" href="{{ url_for('projects_bp.project_detail', pid=data.device.project_id) }}">返回</a>
     <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=device.id) }}">去编辑属性</a>
   </div>
+
+
 </form>
 {% endblock %}

@@ -1,0 +1,134 @@
+{% extends "layout.html" %}
+{% block title %}线缆清册 · {{ project.name }}{% endblock %}
+{% block content %}
+<h2>线缆清册 · 项目：{{ project.name }}</h2>
+
+<div style="margin:8px 0;">
+  <button class="btn" onclick="exportAll()">导出全部</button>
+  <button class="btn" onclick="exportSelected()">导出选中</button>
+  <button class="btn" onclick="printSelected()">打印选中（预览）</button>
+  <button class="btn" onclick="markPrinted()">标记为已打印</button>
+</div>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
+      <th colspan="6">FROM 侧</th>
+      <th colspan="6">TO 侧</th>
+      <th style="width:80px;">状态</th>
+      <th style="width:70px;">LinkID</th>
+    </tr>
+    <tr>
+      <th></th>
+      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>FROM/TO</th>
+      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>TO/FROM</th>
+      <th>已打印</th><th>ID</th>
+    </tr>
+  </thead>
+  <tbody id="tbody">
+    {% for r in items %}
+      {# 方向组合列已在服务层计算为 from_to / to_from；左右侧显示 “A/B” 原始端 #}
+      <tr class="{{ 'printed-row' if r.printed else '' }}">
+        <td><input type="checkbox" name="row" value="{{ r.link_id }}"></td>
+
+        <td>{{ project.name }}</td>
+        <td>{{ r.a_device_name }}</td>
+        <td>{{ r.a_port_type_name or '' }}</td>
+        <td>{{ r.a_port_name }}</td>
+        <td>{{ r.a_label }}</td>
+        <td>{{ r.from_to }}</td>
+
+        <td>{{ project.name }}</td>
+        <td>{{ r.b_device_name }}</td>
+        <td>{{ r.b_port_type_name or '' }}</td>
+        <td>{{ r.b_port_name }}</td>
+        <td>{{ r.b_label }}</td>
+        <td>{{ r.to_from }}</td>
+
+        <td>{{ 'YES' if r.printed else 'NO' }}</td>
+        <td>{{ r.link_id }}</td>
+      </tr>
+    {% endfor %}
+    {% if not items %}
+      <tr><td colspan="16" class="muted">暂无连接</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<!-- 分页 -->
+{% set pages = ( (total + page_size - 1) // page_size ) %}
+<div style="margin-top:8px;">
+  <span class="muted">共 {{ total }} 条，页 {{ page }}/{{ pages }}</span>
+  {% if page > 1 %}
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=1, page_size=page_size) }}">首页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page-1, page_size=page_size) }}">上一页</a>
+  {% endif %}
+  {% if page < pages %}
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page+1, page_size=page_size) }}">下一页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=pages, page_size=page_size) }}">末页</a>
+  {% endif %}
+</div>
+
+<script>
+const PID =Number(' {{ project.id }}');
+const URL_EXPORT  = "{{ url_for('cables_bp.cables_export',  pid=project.id) }}";
+  const URL_PRINTED = "{{ url_for('cables_bp.cables_mark_printed', pid=project.id) }}";
+  const URL_PRINT_VIEW = (ids) =>
+    "{{ url_for('cables_bp.cables_page', pid=project.id) }}".replace('/cables','/cables/print')
+    + '?ids=' + encodeURIComponent(ids.join(','));
+document.getElementById('chkAll').addEventListener('change', (e)=>{
+  document.querySelectorAll('input[name="row"]').forEach(chk=>{ chk.checked = e.target.checked; });
+});
+
+function _selectedIds(){
+  const ids = [];
+  document.querySelectorAll('input[name="row"]:checked').forEach(chk=> ids.push(Number(chk.value)));
+  return ids;
+}
+
+function exportAll(){
+  const form = document.createElement('form');
+  form.method = 'POST'; form.action = URL_EXPORT;
+  const inp = document.createElement('input'); inp.type='hidden'; inp.name='all'; inp.value='1';
+  form.appendChild(inp); document.body.appendChild(form); form.submit(); form.remove();
+}
+
+function exportSelected(){
+  const ids = _selectedIds();
+  if(ids.length===0){ alert('请先选择要导出的记录'); return; }
+  const form = document.createElement('form');
+  form.method = 'POST'; form.action = URL_EXPORT;
+  ids.forEach(id=>{
+    const inp = document.createElement('input'); inp.type='hidden'; inp.name='ids'; inp.value=String(id);
+    form.appendChild(inp);
+  });
+  document.body.appendChild(form); form.submit(); form.remove();
+}
+
+function printSelected(){
+  const ids = _selectedIds();
+  if(ids.length===0){ alert('请先选择要打印的记录'); return; }
+  window.open(URL_PRINT_VIEW(ids), '_blank');
+}
+
+async function markPrinted(){
+  const ids = _selectedIds();
+  if(ids.length===0){ alert('请先选择要标记的记录'); return; }
+  try{
+    const r = await fetch(URL_PRINTED, {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams(ids.map(id=>['ids', String(id)]))
+    }).then(r=>r.json());
+    if(!r.ok){ alert('标记失败'); return; }
+    // 标记成功：刷新当前页
+    location.reload();
+  }catch(e){ alert('请求失败：'+e); }
+}
+</script>
+
+<style>
+.printed-row { background: #f1fff1; }  /* 已打印变色 */
+</style>
+{% endblock %}

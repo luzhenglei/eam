@@ -16,10 +16,9 @@ from services.option_service import list_children
 bp_devices = Blueprint("devices_bp", __name__, url_prefix="/devices")
 
 
-@bp_devices.route("/")
+@bp_devices.route("/", methods=["GET"])
 def list_page():
-    rows = list_devices()
-    return render_template("devices_list.html", rows=rows)
+    return redirect(url_for("projects_bp.project_list"))
 
 @bp_devices.route("/<int:device_id>/preview", methods=["GET"])
 def preview_page(device_id):
@@ -98,37 +97,33 @@ def delete_device_route(device_id):
 
 @bp_devices.route("/<int:device_id>/attrs", methods=["GET", "POST"])
 def edit_attrs(device_id):
-    # 1) 取设备 & 模板
     device = get_device(device_id)
     if not device:
         flash("设备不存在", "err")
-        return redirect(url_for("devices_bp.list_page"))
+        return redirect(url_for("projects_bp.project_list"))
+
     template_id = device.get("template_id")
     if not template_id:
         flash("该设备未绑定模板，无法编辑属性", "err")
-        return redirect(url_for("devices_bp.edit_page", device_id=device_id))
+        return redirect(url_for("projects_bp.project_detail", pid=device.get("project_id")))
 
+    # 每次进入做一次端口对账/补齐
     try:
-        # 2) 每次进入都进行“端口对账/增量补齐”
-        #    —— 支持你在模板中新加/上调端口规则后，这里自动补齐缺口
         _ensure_ports_for_device(template_id, device_id)
     except Exception as e:
-        # 不让同步失败阻断页面，给出提示即可
         flash(f"端口同步失败：{e}", "err")
 
     if request.method == "POST":
-        # 3) 保存属性（使用“对账后”的表单模型）
         form_model = get_template_attrs_for_form(template_id, device_id)
         ok, msg = save_device_attributes(device_id, form_model, request.form)
         if ok:
             flash("已保存属性", "ok")
-            return redirect(url_for("devices_bp.list_page"))
+            # 关键：跳回该设备所在项目
+            return redirect(url_for("projects_bp.project_detail", pid=device.get("project_id")))
         else:
             flash(msg or "保存失败", "err")
-            # 失败时回显同一页
             return render_template("device_attrs_form.html", device=device, attrs=form_model)
 
-    # 4) GET：渲染（使用“对账后”的模型，含最新端口）
     form_model = get_template_attrs_for_form(template_id, device_id)
     return render_template("device_attrs_form.html", device=device, attrs=form_model)
 

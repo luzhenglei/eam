@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+{% block title %}{{ '编辑设备' if device else '新建设备' }} · 项目：{{ project.name }}{% endblock %}
+{% block content %}
+<h2>{{ '编辑设备' if device else '新建设备' }}（项目：{{ project.name }}）</h2>
+
+<form method="post" style="max-width:680px;">
+  <div>
+    <label>设备编号</label>
+    <input type="text" name="name" required value="{{ device.name if device else '' }}" placeholder="例如：SB011">
+  </div>
+  <div>
+    <label>设备型号</label>
+    <input type="text" name="model_code" required value="{{ device.model_code if device else '' }}" placeholder="例如：UNO-2372G">
+  </div>
+
+  {% if not device %}
+  <div>
+    <label>模板</label>
+    <select name="template_id" required>
+      <option value="" disabled selected>（请选择模板）</option>
+      {% for t in templates %}
+        <option value="{{ t.id }}">{{ t.name }}（{{ t.device_type }}）</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:8px;">
+    <button class="btn primary" type="submit">{{ '保存' if device else '创建' }}</button>
+    <a class="btn" href="{{ url_for('projects_bp.project_detail', pid=project.id) }}">返回</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+{% block title %}项目详情 · {{ project.name }}{% endblock %}
+{% block content %}
+<h2>项目：{{ project.name }}</h2>
+<p class="muted">{{ project.remark or '' }}</p>
+<p>
+  <a class="btn primary" href="{{ url_for('projects_bp.device_new_in_project', pid=project.id) }}">新建设备</a>
+  <a class="btn" href="{{ url_for('connect_bp.connect_page', pid=project.id) }}">连接配置</a>
+  <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id) }}">线缆清册</a>
+
+</p>
+
+<table class="table">
+  <thead><tr><th style="width:60px;">ID</th><th>设备编号</th><th>设备型号</th><th>模板</th><th>设备类型</th><th style="width:260px;">操作</th></tr></thead>
+  <tbody>
+    {% for d in devices %}
+      <tr>
+        <td>{{ d.id }}</td>
+        <td>{{ d.name }}</td>
+        <td>{{ d.model_code }}</td>
+        <td>{{ d.template_name or '' }}</td>
+        <td>{{ d.device_type or '' }}</td>
+        <td>
+          <a class="btn" href="{{ url_for('projects_bp.device_edit_in_project', pid=project.id, device_id=d.id) }}">编辑</a>
+          <a class="btn" href="{{ url_for('devices_bp.edit_attrs', device_id=d.id) }}">编辑属性</a>
+          <a class="btn" href="{{ url_for('devices_bp.preview_page', device_id=d.id) }}">预览</a>
+          <form method="post"
+                action="{{ url_for('projects_bp.device_delete_in_project', pid=project.id, device_id=d.id) }}"
+                style="display:inline"
+                onsubmit="return confirm('确认删除该设备？（相关端口/连接将级联删除）');">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+        </td>
+
+      </tr>
+    {% endfor %}
+    {% if not devices %}<tr><td colspan="6" class="muted">该项目暂无设备</td></tr>{% endif %}
+  </tbody>
+</table>
+{% endblock %}
