@@ -1,0 +1,207 @@
+-- eam.attribute_def definition
+
+CREATE TABLE `attribute_def` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '属性唯一编码',
+  `name` varchar(255) NOT NULL COMMENT '属性显示名',
+  `scope` enum('device','port') NOT NULL COMMENT '属性作用域：device=设备属性、port=端口属性',
+  `data_type` enum('text','int','decimal','bool','date','enum','json') NOT NULL COMMENT '数据类型；enum 表示使用 attribute_option 枚举树',
+  `unit` varchar(64) DEFAULT NULL COMMENT '计量单位（可选）',
+  `min_value` decimal(20,6) DEFAULT NULL COMMENT '（可选）数值下限；应用层校验',
+  `max_value` decimal(20,6) DEFAULT NULL COMMENT '（可选）数值上限；应用层校验',
+  `allow_multi` tinyint(1) NOT NULL DEFAULT '0' COMMENT '0:单选 1:多选(多个option_id)',
+  `description` text COMMENT '属性说明',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='属性定义表（设备/端口统一管理）';
+
+
+-- eam.device_template definition
+
+CREATE TABLE `device_template` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` varchar(255) NOT NULL COMMENT '模板名称，例如“交换机模板V1”',
+  `device_type` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '设备类型',
+  `version` varchar(10) NOT NULL DEFAULT '1' COMMENT '模板版本号',
+  `is_locked` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否锁定（锁定后不再修改）',
+  `created_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `created_by` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '1' COMMENT '创建者',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备模板';
+
+
+-- eam.port_type definition
+
+CREATE TABLE `port_type` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `code` varchar(128) NOT NULL COMMENT '类型编码：如 RJ45 / SFP / QSFP28',
+  `name` varchar(255) NOT NULL COMMENT '类型名称',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='端口类型标准表';
+
+
+-- eam.project definition
+
+CREATE TABLE `project` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(200) NOT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+-- eam.attribute_option definition
+
+CREATE TABLE `attribute_option` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `attribute_id` bigint unsigned NOT NULL COMMENT '归属的属性ID（attribute_def.id），要求 data_type=enum',
+  `name` varchar(255) NOT NULL COMMENT '选项名（如 IT类产品 / 计算机 / 铜缆系统 / LAN1）',
+  `code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '选项编码',
+  `parent_id` bigint unsigned DEFAULT NULL COMMENT '父选项ID，NULL表示顶层',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT '同级显示顺序',
+  PRIMARY KEY (`id`),
+  KEY `idx_opt_attr` (`attribute_id`),
+  KEY `idx_opt_parent` (`parent_id`),
+  CONSTRAINT `fk_opt_attr` FOREIGN KEY (`attribute_id`) REFERENCES `attribute_def` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_opt_parent` FOREIGN KEY (`parent_id`) REFERENCES `attribute_option` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='属性枚举选项（树形结构）';
+
+
+-- eam.device definition
+
+CREATE TABLE `device` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `project_id` bigint unsigned NOT NULL,
+  `template_id` bigint unsigned NOT NULL COMMENT '来源模板ID（device_template.id）',
+  `name` varchar(255) NOT NULL COMMENT '设备名称',
+  `model_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '设备型号',
+  `serial_no` varchar(255) DEFAULT NULL COMMENT '序列号（可选）',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `created_by` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '1' COMMENT '创建者',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_device_project_name` (`project_id`,`name`),
+  KEY `idx_dev_template` (`template_id`),
+  CONSTRAINT `fk_device_project` FOREIGN KEY (`project_id`) REFERENCES `project` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_device_template` FOREIGN KEY (`template_id`) REFERENCES `device_template` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备实例';
+
+
+-- eam.device_attr_value definition
+
+CREATE TABLE `device_attr_value` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `device_id` bigint unsigned NOT NULL COMMENT '设备ID（device.id）',
+  `attribute_id` bigint unsigned NOT NULL COMMENT '属性ID（attribute_def.id），应为 scope=device',
+  `option_id` bigint unsigned DEFAULT NULL COMMENT '当属性为 enum 时，记录所选 option（attribute_option.id）',
+  `value_text` text COMMENT '当属性非 enum 时，这里保存实际值（统一以文本存储）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dev_attr_opt_val` (`device_id`,`attribute_id`,`option_id`,`value_text`(191)),
+  KEY `idx_dav_device` (`device_id`),
+  KEY `idx_dav_attr` (`attribute_id`),
+  KEY `idx_dav_option` (`option_id`),
+  KEY `idx_dav_device_attr` (`device_id`,`attribute_id`),
+  CONSTRAINT `fk_dav_attr` FOREIGN KEY (`attribute_id`) REFERENCES `attribute_def` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_dav_device` FOREIGN KEY (`device_id`) REFERENCES `device` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_dav_option` FOREIGN KEY (`option_id`) REFERENCES `attribute_option` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=65 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备属性值（EAV 模型）';
+
+
+-- eam.port definition
+
+CREATE TABLE `port` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `device_id` bigint unsigned NOT NULL COMMENT '所属设备ID（device.id）',
+  `name` varchar(255) NOT NULL COMMENT '端口名：LAN1/LAN2/GE0/0/1 等（同设备内唯一）',
+  `port_template_id` int DEFAULT NULL,
+  `port_type_id` bigint unsigned DEFAULT NULL COMMENT '端口类型（port_type.id）',
+  `index_no` int DEFAULT NULL COMMENT '端口序号（排序用，可空）',
+  `parent_port_id` bigint unsigned DEFAULT NULL COMMENT '父端口ID（端口树，聚合或子端口）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_port_device_name` (`device_id`,`name`),
+  KEY `idx_port_device` (`device_id`),
+  KEY `idx_port_type` (`port_type_id`),
+  KEY `idx_port_parent` (`parent_port_id`),
+  KEY `idx_port_ptpl` (`port_template_id`),
+  CONSTRAINT `fk_port_device` FOREIGN KEY (`device_id`) REFERENCES `device` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_port_parent` FOREIGN KEY (`parent_port_id`) REFERENCES `port` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_port_type` FOREIGN KEY (`port_type_id`) REFERENCES `port_type` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=145 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='端口实例';
+
+
+-- eam.port_attr_value definition
+
+CREATE TABLE `port_attr_value` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `port_id` bigint unsigned NOT NULL COMMENT '端口ID（port.id）',
+  `attribute_id` bigint unsigned NOT NULL COMMENT '属性ID（attribute_def.id），应为 scope=port',
+  `option_id` bigint unsigned DEFAULT NULL COMMENT '当属性为 enum 时，记录所选 option（attribute_option.id）',
+  `value_text` text COMMENT '当属性非 enum 时，这里保存实际值（统一以文本存储）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_pav_port_attr_opt_val` (`port_id`,`attribute_id`,`option_id`,`value_text`(191)),
+  KEY `idx_pav_port` (`port_id`),
+  KEY `idx_pav_attr` (`attribute_id`),
+  KEY `idx_pav_option` (`option_id`),
+  KEY `idx_pav_port_attr` (`port_id`,`attribute_id`),
+  CONSTRAINT `fk_pav_attr` FOREIGN KEY (`attribute_id`) REFERENCES `attribute_def` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_pav_option` FOREIGN KEY (`option_id`) REFERENCES `attribute_option` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_pav_port` FOREIGN KEY (`port_id`) REFERENCES `port` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=121 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='端口属性值（EAV 模型）';
+
+
+-- eam.port_template definition
+
+CREATE TABLE `port_template` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `template_id` bigint NOT NULL,
+  `code` varchar(64) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `port_type_id` bigint unsigned DEFAULT NULL COMMENT '端口类型（port_type.id）',
+  `qty` int NOT NULL DEFAULT '1',
+  `naming_rule` varchar(128) DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tpl` (`template_id`,`code`,`name`),
+  KEY `idx_tpl` (`template_id`),
+  KEY `fk_pt_port_type` (`port_type_id`),
+  CONSTRAINT `fk_pt_port_type` FOREIGN KEY (`port_type_id`) REFERENCES `port_type` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备模板下的端口槽位/生成规则';
+
+
+-- eam.template_attribute definition
+
+CREATE TABLE `template_attribute` (
+  `template_id` bigint unsigned NOT NULL COMMENT '设备模板ID',
+  `attribute_id` bigint unsigned NOT NULL COMMENT '属性ID（attribute_def.id）',
+  `is_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '该模板下是否必填',
+  PRIMARY KEY (`template_id`,`attribute_id`),
+  KEY `fk_ta_attr` (`attribute_id`),
+  CONSTRAINT `fk_ta_attr` FOREIGN KEY (`attribute_id`) REFERENCES `attribute_def` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ta_template` FOREIGN KEY (`template_id`) REFERENCES `device_template` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='模板与属性的关联与必填配置';
+
+
+-- eam.link definition
+
+CREATE TABLE `link` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `project_id` bigint unsigned NOT NULL,
+  `a_device_id` bigint unsigned NOT NULL,
+  `a_port_id` bigint unsigned NOT NULL,
+  `b_device_id` bigint unsigned NOT NULL,
+  `b_port_id` bigint unsigned NOT NULL,
+  `status` enum('PLANNED','CONNECTED') NOT NULL DEFAULT 'CONNECTED',
+  `remark` varchar(500) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `printed` tinyint(1) NOT NULL DEFAULT '0',
+  `printed_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_link_b_port` (`project_id`,`b_port_id`),
+  UNIQUE KEY `uk_link_a_port` (`project_id`,`a_port_id`),
+  KEY `fk_link_a_port` (`a_port_id`),
+  KEY `fk_link_b_port` (`b_port_id`),
+  CONSTRAINT `fk_link_a_port` FOREIGN KEY (`a_port_id`) REFERENCES `port` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_link_b_port` FOREIGN KEY (`b_port_id`) REFERENCES `port` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_link_project` FOREIGN KEY (`project_id`) REFERENCES `project` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
