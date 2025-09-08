@@ -118,6 +118,7 @@ CREATE TABLE `port` (
   `port_type_id` bigint unsigned DEFAULT NULL COMMENT '端口类型（port_type.id）',
   `index_no` int DEFAULT NULL COMMENT '端口序号（排序用，可空）',
   `parent_port_id` bigint unsigned DEFAULT NULL COMMENT '父端口ID（端口树，聚合或子端口）',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT '0=关;1=开',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_port_device_name` (`device_id`,`name`),
   KEY `idx_port_device` (`device_id`),
