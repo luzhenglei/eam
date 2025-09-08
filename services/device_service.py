@@ -372,6 +372,7 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
                 "id": pid,
                 "name": p.get("name") or f"Port-{pid}",
                 "parent_port_id": p.get("parent_port_id"),
+                "max_links": p.get("max_links") or 1,
             },
             "flat_attrs": pa_flat,
             "cascaded_groups": pa_cascade
@@ -420,12 +421,12 @@ def _list_device_ports(device_id: int):
                     # 注意：col 来自受控白名单，非用户输入
                     cur.execute(
                         f"""
-                        SELECT id, {col} AS name, parent_port_id
+                        SELECT id, {col} AS name, parent_port_id, max_links
                         FROM port
                         WHERE device_id=%s
                         ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
                         """,
-                        (device_id,)
+                        (device_id,),
                     )
                     rows = cur.fetchall()
                     # 若该列存在但值全是 NULL/空，也继续使用（前端会显示空字符串）
@@ -437,12 +438,12 @@ def _list_device_ports(device_id: int):
             # 兜底：只取 id，自造一个 name
             cur.execute(
                 """
-                SELECT id, parent_port_id
+                SELECT id, parent_port_id, max_links
                 FROM port
                 WHERE device_id=%s
                 ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
                 """,
-                (device_id,)
+                (device_id,),
             )
             rows = cur.fetchall()
             for r in rows:
@@ -625,6 +626,16 @@ def save_device_attributes(device_id: int, form_model: dict, payload: dict):
             for p in form_model.get("ports", []):
                 port_id = p["port"]["id"]
 
+                # 更新端口最大连接数
+                raw_ml = payload.get(f"port_{port_id}_max_links")
+                try:
+                    ml = int(raw_ml)
+                    if ml < 1:
+                        ml = 1
+                except Exception:
+                    ml = 1
+                cur.execute("UPDATE port SET max_links=%s WHERE id=%s", (ml, port_id))
+
                 # 普通端口属性
                 for item in p.get("flat_attrs", []):
                     aid = item["attribute_id"]
@@ -714,7 +725,7 @@ def _ensure_ports_for_device(template_id: int, device_id: int):
     with get_conn() as conn, conn.cursor() as cur:
         # 取模板规则
         cur.execute("""
-            SELECT id, code, qty, port_type_id
+            SELECT id, code, qty, port_type_id, max_links
             FROM port_template
             WHERE template_id=%s
             ORDER BY sort_order, id
@@ -772,6 +783,7 @@ def _ensure_ports_for_device(template_id: int, device_id: int):
                     continue
                 start = prefix_max.get(code, 0) + 1
                 ptype = r.get("port_type_id")
+                ml = r.get("max_links") or 1
                 # 补 need 个
                 for i in range(need):
                     nm = f"{code}{start+i}"
@@ -782,13 +794,13 @@ def _ensure_ports_for_device(template_id: int, device_id: int):
                     # 插入端口时：
                     if ptype:
                         cur.execute(
-                        "INSERT INTO port (device_id, name, port_type_id, port_template_id) VALUES (%s, %s, %s, %s)",
-                        (device_id, nm, ptype, r["id"])
+                        "INSERT INTO port (device_id, name, port_type_id, port_template_id, max_links) VALUES (%s, %s, %s, %s, %s)",
+                        (device_id, nm, ptype, r["id"], ml)
                         )
                     else:
                         cur.execute(
-                        "INSERT INTO port (device_id, name, port_template_id) VALUES (%s, %s, %s)",
-                        (device_id, nm, r["id"])
+                        "INSERT INTO port (device_id, name, port_template_id, max_links) VALUES (%s, %s, %s, %s)",
+                        (device_id, nm, r["id"], ml)
                         )
 
                     used_names.add(nm)
@@ -807,8 +819,8 @@ def _ensure_ports_for_device(template_id: int, device_id: int):
                     start += 1
                     nm = f"{start+i}"
                 cur.execute(
-                    "INSERT INTO port (device_id, name) VALUES (%s, %s)",
-                    (device_id, nm)
+                    "INSERT INTO port (device_id, name, max_links) VALUES (%s, %s, %s)",
+                    (device_id, nm, 1)
                 )
                 used_names.add(nm)
 
@@ -823,7 +835,7 @@ def list_port_templates(template_id: int):
             SELECT pt.id, pt.template_id, pt.code, pt.name,
                    pt.port_type_id,
                    t.name AS port_type_name,
-                   pt.qty, pt.naming_rule, pt.sort_order
+                   pt.qty, pt.naming_rule, pt.sort_order, pt.max_links
             FROM port_template pt
             LEFT JOIN port_type t ON t.id = pt.port_type_id
             WHERE pt.template_id=%s
@@ -833,12 +845,13 @@ def list_port_templates(template_id: int):
 
 def create_port_template(template_id: int, code: str, name: str,
                          qty: int = 1, naming_rule: str = None,
-                         sort_order: int = 0, port_type_id: int = None):
+                         sort_order: int = 0, port_type_id: int = None,
+                         max_links: int = 1):
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO port_template (template_id, code, name, port_type_id, qty, naming_rule, sort_order)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (template_id, code, name, port_type_id, qty, naming_rule, sort_order))
+            INSERT INTO port_template (template_id, code, name, port_type_id, qty, naming_rule, sort_order, max_links)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (template_id, code, name, port_type_id, qty, naming_rule, sort_order, max_links))
         return cur.lastrowid
 
 def delete_port_template(pt_id: int):
