@@ -78,24 +78,24 @@
 
 <h3 style="margin-top:16px;">预览：本模板将生成的端口</h3>
 <ul class="tree">
-  {% for r in rows %}
+  {% for ptype, attrs in ports_tree.items() %}
     <li>
-      <strong>{{ r.code }}</strong>
-      {% if r.port_type_name %}<span class="muted"> · {{ r.port_type_name }}</span>{% endif %}
+      <strong>{{ ptype }}</strong>
       <ul>
-        {% set qty = (r.qty|int if r.qty is not none else 1) %}
-        {% set base = (r.code or '') %}
-        {% if qty < 1 %}
-          <li class="muted">数量无效（应 ≥ 1）</li>
-        {% else %}
-          {% for i in range(1, qty + 1) %}
-            <li>{{ base ~ i }}</li>
-          {% endfor %}
-        {% endif %}
+        {% for attr, names in attrs.items() %}
+          <li>
+            {{ attr }}
+            <ul>
+              {% for n in names %}
+                <li>{{ n }}</li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
       </ul>
     </li>
   {% endfor %}
-  {% if not rows %}
+  {% if not ports_tree %}
     <li class="muted">暂无可预览端口</li>
   {% endif %}
 </ul>
