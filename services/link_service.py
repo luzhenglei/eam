@@ -36,8 +36,7 @@ def list_ports_for_device(project_id: int, device_id: int) -> List[Dict[str, Any
         WHERE d.project_id=%s AND d.id=%s
         ORDER BY t.name, pt.name, p.index_no, p.id
     """
-=======
-    """判断端口在该项目下是否连接数已达上限。"""
+
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, (project_id, device_id))
         rows = cur.fetchall() or []
@@ -52,6 +51,8 @@ def list_ports_for_device(project_id: int, device_id: int) -> List[Dict[str, Any
 def find_matching_ports(project_id: int, src_port_id: int, target_device_id: int) -> List[Dict[str, Any]]:
     """给定源端口和目标设备，返回可连接的目标端口列表。"""
     with get_conn() as conn, conn.cursor() as cur:
+
+
         # 读取源端口的类型及属性
         cur.execute(
             """
@@ -65,6 +66,7 @@ def find_matching_ports(project_id: int, src_port_id: int, target_device_id: int
         src = cur.fetchone()
         if not src:
             return []
+
 
         cur.execute(
             """
@@ -103,7 +105,7 @@ def update_port_active(project_id: int, port_id: int, is_active: bool) -> bool:
         conn.commit()
         return cur.rowcount > 0
 
-=======
+
             SELECT p.max_links,
                    (
                      SELECT COUNT(*) FROM link
@@ -120,6 +122,27 @@ def update_port_active(project_id: int, port_id: int, is_active: bool) -> bool:
             return True
         return int(row.get("c", 0)) >= int(row.get("max_links") or 1)
 
+    result: List[Dict[str, Any]] = []
+    for r in rows:
+        pid = int(r["port_id"])
+        if _is_port_occupied(project_id, pid):
+            continue
+        result.append(r)
+    return result
+
+
+
+def update_port_active(project_id: int, port_id: int, is_active: bool) -> bool:
+    """切换端口开关状态。若端口已连线且要关闭则报错。"""
+    if not is_active and _is_port_occupied(project_id, port_id):
+        raise ValueError("端口已连线，无法关闭")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE port SET is_active=%s WHERE id=%s",
+            (1 if is_active else 0, port_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 # ================== 单设备端口列表 ==================
 

@@ -119,6 +119,7 @@ CREATE TABLE `port` (
   `index_no` int DEFAULT NULL COMMENT '端口序号（排序用，可空）',
   `parent_port_id` bigint unsigned DEFAULT NULL COMMENT '父端口ID（端口树，聚合或子端口）',
   `is_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT '0=关;1=开',
+
   `max_links` int NOT NULL DEFAULT '1' COMMENT '允许的最大连接数',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_port_device_name` (`device_id`,`name`),
