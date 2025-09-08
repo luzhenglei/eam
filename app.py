@@ -13,6 +13,7 @@ from blueprints.connect import bp_connect
 from blueprints.projects import bp_projects
 from blueprints.cables import bp_cables
 from blueprints.connect import bp_connect
+from blueprints.ports import bp_ports
 
 
 def create_app():
@@ -29,6 +30,7 @@ def create_app():
     app.register_blueprint(bp_connect)
     app.register_blueprint(bp_projects)
     app.register_blueprint(bp_cables)
+    app.register_blueprint(bp_ports)
     return app
 
 app = create_app()

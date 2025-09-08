@@ -373,6 +373,7 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
                 "name": p.get("name") or f"Port-{pid}",
                 "parent_port_id": p.get("parent_port_id"),
                 "max_links": p.get("max_links") or 1,
+                "is_active": p.get("is_active", 1),
             },
             "flat_attrs": pa_flat,
             "cascaded_groups": pa_cascade
@@ -421,7 +422,7 @@ def _list_device_ports(device_id: int):
                     # 注意：col 来自受控白名单，非用户输入
                     cur.execute(
                         f"""
-                        SELECT id, {col} AS name, parent_port_id, max_links
+                        SELECT id, {col} AS name, parent_port_id, max_links, is_active
                         FROM port
                         WHERE device_id=%s
                         ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
@@ -438,17 +439,17 @@ def _list_device_ports(device_id: int):
             # 兜底：只取 id，自造一个 name
             cur.execute(
                 """
-                SELECT id, parent_port_id, max_links
+                SELECT id, parent_port_id, max_links, is_active
                 FROM port
                 WHERE device_id=%s
                 ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
-                """,
-                (device_id,),
-            )
-            rows = cur.fetchall()
-            for r in rows:
-                r["name"] = f"Port-{r['id']}"
-            return rows
+            """,
+            (device_id,),
+        )
+        rows = cur.fetchall()
+        for r in rows:
+            r["name"] = f"Port-{r['id']}"
+        return rows
 
 
 def create_child_port(device_id: int, parent_port_id: int, name: str) -> int:

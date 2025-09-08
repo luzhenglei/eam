@@ -68,6 +68,11 @@
       </div>
       {% endif %}
       <div style="margin-bottom:8px;">
+        <label>启用
+          <input type="checkbox" class="toggle-port-active" data-url="{{ url_for('ports_bp.update_active', pid=device.project_id, port_id=p.port.id) }}" {% if p.port.is_active %}checked{% endif %}>
+        </label>
+      </div>
+      <div style="margin-bottom:8px;">
         <label>最大连接数</label>
         <input type="number" name="port_{{ p.port.id }}_max_links" min="1" value="{{ p.port.max_links }}" style="width:100px;">
       </div>
@@ -150,6 +155,26 @@ function addChildPort(parentId){
     else{ alert(res.msg || '创建失败'); }
   });
 }
+
+document.querySelectorAll('.toggle-port-active').forEach(cb=>{
+  cb.addEventListener('change', ()=>{
+    const url = cb.dataset.url;
+    const active = cb.checked ? 1 : 0;
+    fetch(url, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({is_active: active})
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){
+        alert(res.msg || '操作失败');
+        cb.checked = !cb.checked;
+      }
+    }).catch(()=>{
+      alert('网络错误');
+      cb.checked = !cb.checked;
+    });
+  });
+});
 </script>
 
 <!-- ===================== 设备级：单属性树级联渲染 ===================== -->
