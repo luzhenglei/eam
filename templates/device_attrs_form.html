@@ -60,8 +60,22 @@
   <!-- ===================== 端口属性（每个端口一个区块） ===================== -->
   <h3 style="margin-top:24px;">端口属性</h3>
   {% for p in attrs.ports %}
-    <fieldset style="border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0;">
+    <fieldset style="border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0;{% if p.port.parent_port_id %}margin-left:32px;{% endif %}">
       <legend>端口：{{ p.port.name }}（ID: {{ p.port.id }}）</legend>
+      {% if not p.port.parent_port_id %}
+      <div style="margin-bottom:8px;">
+        <button type="button" class="btn" onclick="addChildPort({{ p.port.id }})">新增子端口</button>
+      </div>
+      {% endif %}
+      <div style="margin-bottom:8px;">
+        <label>启用
+          <input type="checkbox" class="toggle-port-active" data-url="{{ url_for('ports_bp.update_active', pid=device.project_id, port_id=p.port.id) }}" {% if p.port.is_active %}checked{% endif %}>
+        </label>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label>最大连接数</label>
+        <input type="number" name="port_{{ p.port.id }}_max_links" min="1" value="{{ p.port.max_links }}" style="width:100px;">
+      </div>
 
       <!-- 端口普通属性 -->
       <table class="table">
@@ -128,6 +142,39 @@
 <script>
 async function fetchJSON(url){ const r = await fetch(url); return await r.json(); }
 const API_CHILDREN = "{{ url_for('devices_bp.api_options_children') }}"; // ?attribute_id=&parent_id=
+const API_ADD_CHILD_BASE = "{{ url_for('devices_bp.create_child_port_api', device_id=device.id, parent_port_id=0) }}".replace('/0/children','');
+function addChildPort(parentId){
+  const nm = prompt('请输入子端口名称');
+  if(!nm) return;
+  fetch(`${API_ADD_CHILD_BASE}/${parentId}/children`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:nm})
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok){ location.reload(); }
+    else{ alert(res.msg || '创建失败'); }
+  });
+}
+
+document.querySelectorAll('.toggle-port-active').forEach(cb=>{
+  cb.addEventListener('change', ()=>{
+    const url = cb.dataset.url;
+    const active = cb.checked ? 1 : 0;
+    fetch(url, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({is_active: active})
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){
+        alert(res.msg || '操作失败');
+        cb.checked = !cb.checked;
+      }
+    }).catch(()=>{
+      alert('网络错误');
+      cb.checked = !cb.checked;
+    });
+  });
+});
 </script>
 
 <!-- ===================== 设备级：单属性树级联渲染 ===================== -->
