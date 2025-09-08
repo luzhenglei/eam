@@ -39,8 +39,27 @@ def port_tpl_manage(template_id):
         return redirect(url_for("tpl_bp.port_tpl_manage", template_id=template_id))
 
     rows = list_port_templates(template_id)
-    port_types = list_port_types()  # 新增：供下拉选择
-    return render_template("port_template_manage.html", template_id=template_id, rows=rows, port_types=port_types)
+    port_types = list_port_types()  # 供下拉选择
+
+    # 构建预览树：端口类型 -> 属性 -> [端口名...]
+    ports_tree = {}
+    for r in rows:
+        ptype = r.get("port_type_name") or "未分类"
+        attr = r.get("name") or "（未命名属性）"
+        code = (r.get("code") or "").strip()
+        qty = int(r.get("qty") or 1)
+        if qty < 1:
+            continue
+        names = [f"{code}{i}" for i in range(1, qty + 1)]
+        ports_tree.setdefault(ptype, {}).setdefault(attr, []).extend(names)
+
+    return render_template(
+        "port_template_manage.html",
+        template_id=template_id,
+        rows=rows,
+        port_types=port_types,
+        ports_tree=ports_tree,
+    )
 
 
 @tpl_bp.route("/port-templates/<int:pt_id>/delete", methods=["POST"])

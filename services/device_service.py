@@ -817,15 +817,6 @@ def _option_name_map(attribute_id: int) -> Dict[int, str]:
         mapping[op["id"]] = op["name"]
     return mapping
 
-
-
-def _option_name_map(attribute_id: int) -> Dict[int, str]:
-    """把某个属性的所有选项做成 {id: name} 的字典，便于展示。"""
-    mapping = {}
-    for op in list_options(attribute_id):
-        mapping[op["id"]] = op["name"]
-    return mapping
-
 def get_device_preview_data(device_id: int):
     """
     预览页数据（树状）：
