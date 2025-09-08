@@ -7,8 +7,9 @@ from services.device_service import (
     create_device_basic,  # 用于新增设备
     delete_device,
     update_device_basic,  # 用于更新设备
-    _ensure_ports_for_device,  # 
+    _ensure_ports_for_device,  #
     get_device_preview_data,
+    create_child_port,
 )
 from services.template_service import list_templates
 from services.option_service import list_children
@@ -126,6 +127,20 @@ def edit_attrs(device_id):
 
     form_model = get_template_attrs_for_form(template_id, device_id)
     return render_template("device_attrs_form.html", device=device, attrs=form_model)
+
+# --------- 端口相关 API ---------
+
+@bp_devices.route("/<int:device_id>/ports/<int:parent_port_id>/children", methods=["POST"])
+def create_child_port_api(device_id, parent_port_id):
+    name = (request.json.get("name") if request.is_json else request.form.get("name")) or ""
+    name = name.strip()
+    if not name:
+        return jsonify({"ok": False, "msg": "name required"}), 400
+    try:
+        cid = create_child_port(device_id, parent_port_id, name)
+        return jsonify({"ok": True, "data": {"id": cid}})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 # --------- AJAX API：按父子关系返回直接子项 ---------
 @bp_devices.route("/options-children")

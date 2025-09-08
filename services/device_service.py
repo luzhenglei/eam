@@ -368,7 +368,11 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
                 pa_flat.append(a)
 
         ports_model.append({
-            "port": {"id": pid, "name": p.get("name") or f"Port-{pid}"},
+            "port": {
+                "id": pid,
+                "name": p.get("name") or f"Port-{pid}",
+                "parent_port_id": p.get("parent_port_id"),
+            },
             "flat_attrs": pa_flat,
             "cascaded_groups": pa_cascade
         })
@@ -414,7 +418,15 @@ def _list_device_ports(device_id: int):
             for col in candidates:
                 try:
                     # 注意：col 来自受控白名单，非用户输入
-                    cur.execute(f"SELECT id, {col} AS name FROM port WHERE device_id=%s ORDER BY id", (device_id,))
+                    cur.execute(
+                        f"""
+                        SELECT id, {col} AS name, parent_port_id
+                        FROM port
+                        WHERE device_id=%s
+                        ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
+                        """,
+                        (device_id,)
+                    )
                     rows = cur.fetchall()
                     # 若该列存在但值全是 NULL/空，也继续使用（前端会显示空字符串）
                     return rows
@@ -423,11 +435,67 @@ def _list_device_ports(device_id: int):
                     conn.rollback()
                     continue
             # 兜底：只取 id，自造一个 name
-            cur.execute("SELECT id FROM port WHERE device_id=%s ORDER BY id", (device_id,))
+            cur.execute(
+                """
+                SELECT id, parent_port_id
+                FROM port
+                WHERE device_id=%s
+                ORDER BY COALESCE(parent_port_id, id), (parent_port_id IS NULL) DESC, id
+                """,
+                (device_id,)
+            )
             rows = cur.fetchall()
             for r in rows:
                 r["name"] = f"Port-{r['id']}"
             return rows
+
+
+def create_child_port(device_id: int, parent_port_id: int, name: str) -> int:
+    """在设备下为某端口新增子端口（仅允许一层）。"""
+    if not name or not str(name).strip():
+        raise ValueError("name required")
+    name = str(name).strip()
+    with get_conn() as conn, conn.cursor() as cur:
+        # 检查父端口合法性
+        cur.execute(
+            "SELECT id, port_type_id, parent_port_id FROM port WHERE id=%s AND device_id=%s",
+            (parent_port_id, device_id),
+        )
+        parent = cur.fetchone()
+        if not parent:
+            raise ValueError("parent port not found")
+        if parent.get("parent_port_id"):
+            raise ValueError("only one level of nesting allowed")
+
+        # 名称冲突检查（同设备内）
+        cur.execute(
+            "SELECT 1 FROM port WHERE device_id=%s AND name=%s",
+            (device_id, name),
+        )
+        if cur.fetchone():
+            raise ValueError("port name already exists")
+
+        # 插入子端口
+        cur.execute(
+            "INSERT INTO port (device_id, name, parent_port_id, port_type_id) VALUES (%s,%s,%s,%s)",
+            (device_id, name, parent_port_id, parent.get("port_type_id")),
+        )
+        new_id = cur.lastrowid
+
+        # 继承属性
+        cur.execute(
+            "SELECT attribute_id, option_id, value_text FROM port_attr_value WHERE port_id=%s",
+            (parent_port_id,),
+        )
+        rows = cur.fetchall() or []
+        for r in rows:
+            cur.execute(
+                "INSERT INTO port_attr_value (port_id, attribute_id, option_id, value_text) VALUES (%s,%s,%s,%s)",
+                (new_id, r["attribute_id"], r["option_id"], r["value_text"]),
+            )
+
+        conn.commit()
+        return new_id
 
 
 def _list_template_port_attrs(template_id: int):
