@@ -67,6 +67,10 @@
         <button type="button" class="btn" onclick="addChildPort({{ p.port.id }})">新增子端口</button>
       </div>
       {% endif %}
+      <div style="margin-bottom:8px;">
+        <label>最大连接数</label>
+        <input type="number" name="port_{{ p.port.id }}_max_links" min="1" value="{{ p.port.max_links }}" style="width:100px;">
+      </div>
 
       <!-- 端口普通属性 -->
       <table class="table">

@@ -7,19 +7,25 @@ from db import get_conn  # 数据库连接工具
 # ================== 工具函数 ==================
 
 def _is_port_occupied(project_id: int, port_id: int) -> bool:
-    """判断端口在该项目下是否已被占用。"""
+    """判断端口在该项目下是否连接数已达上限。"""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT COUNT(*) AS c
-            FROM link
-            WHERE project_id=%s AND status='CONNECTED'
-              AND (a_port_id=%s OR b_port_id=%s)
+            SELECT p.max_links,
+                   (
+                     SELECT COUNT(*) FROM link
+                     WHERE project_id=%s AND status='CONNECTED'
+                       AND (a_port_id=%s OR b_port_id=%s)
+                   ) AS c
+            FROM port p
+            WHERE p.id=%s
             """,
-            (project_id, port_id, port_id),
+            (project_id, port_id, port_id, port_id),
         )
-        c = (cur.fetchone() or {}).get("c", 0)
-        return int(c) > 0
+        row = cur.fetchone()
+        if not row:
+            return True
+        return int(row.get("c", 0)) >= int(row.get("max_links") or 1)
 
 
 # ================== 候选端口 ==================
@@ -136,7 +142,7 @@ def create_link(project_id: int, a_port_id: int, b_port_id: int, status: str = "
     if (a.get("rule_attr_name") or "") != (b.get("rule_attr_name") or ""):
         raise ValueError("端口属性不匹配")
     if _is_port_occupied(project_id, a_port_id) or _is_port_occupied(project_id, b_port_id):
-        raise ValueError("端口已被占用")
+        raise ValueError("端口连接数已达上限")
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
