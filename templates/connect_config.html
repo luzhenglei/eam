@@ -9,57 +9,24 @@
   const URL_SEARCH = "{{ url_for('connect_bp.api_search_devices', pid=project.id) }}";
   const URL_CAND   = "{{ url_for('connect_bp.api_candidates',    pid=project.id) }}";
   const URL_MAKE   = "{{ url_for('connect_bp.api_make_link',     pid=project.id) }}";
-  const URL_LINKS  = "{{ url_for('connect_bp.api_list_links',    pid=project.id) }}";
+  const URL_PORTS  = (id) => "{{ url_for('connect_bp.api_device_ports', pid=project.id, did=0) }}".replace('/0/','/'+id+'/');
   const URL_DEL    = (id) => "{{ url_for('connect_bp.api_delete_link', pid=project.id, link_id=0) }}".replace('/0/','/'+id+'/');
 </script>
 
-<div class="grid-2" style="gap:16px;">
-  <section>
-    <h3>设备 A</h3>
-    <input id="qA" type="text" placeholder="按设备编号/型号搜索">
-    <button class="btn" id="btnSearchA">搜索</button>
-    <ul id="listA" class="tree"></ul>
-  </section>
+<section>
+  <h3>设备 A</h3>
+  <input id="qA" type="text" placeholder="按设备编号/型号搜索">
+  <button class="btn" id="btnSearchA">搜索</button>
+  <ul id="listA" class="tree"></ul>
+</section>
 
-  <section>
-    <h3>设备 B</h3>
-    <input id="qB" type="text" placeholder="按设备编号/型号搜索">
-    <button class="btn" id="btnSearchB">搜索</button>
-    <ul id="listB" class="tree"></ul>
-  </section>
-</div>
-
-<div style="margin-top:12px;">
-  <button class="btn primary" id="btnLoad">加载候选端口</button>
-  <span id="pairInfo" class="muted"></span>
-</div>
-
-<div class="grid-2" style="gap:16px; margin-top:12px;">
-  <section>
-    <h3>可选端口 · A</h3>
-    <ul id="candA" class="tree"></ul>
-  </section>
-  <section>
-    <h3>可选端口 · B</h3>
-    <ul id="candB" class="tree"></ul>
-  </section>
-</div>
-
-<div style="margin-top:12px;">
-  <button class="btn primary" id="btnMake" disabled>建立连接</button>
-  <span id="msg" class="muted"></span>
-</div>
-
-<h3 style="margin-top:16px;">已连接</h3>
-<ul id="links" class="tree"></ul>
+<h3 style="margin-top:16px;">端口</h3>
+<div id="ports"></div>
 
 <script>
 (() => {
-  // 全局选择状态
-  let selA = null, selB = null;      // 选择的设备
-  let pickA = null, pickB = null;    // 选择的端口
+  let selA = null; // 当前选择的设备A
 
-  // 工具
   async function j(url){ const r = await fetch(url, {credentials:'same-origin'}); return await r.json(); }
   async function jp(url, data){
     const r = await fetch(url, {
@@ -70,159 +37,133 @@
     });
     return await r.json();
   }
-  const debounce = (fn, wait=200) => {
-    let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
-  };
+  const debounce = (fn, wait=200) => { let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; };
 
-  // 搜索设备
-  async function searchDev(side){
+  // 搜索设备A
+  async function searchDev(){
     try{
-      const q = document.getElementById('q'+side).value || '';
+      const q = document.getElementById('qA').value || '';
       const res = await j(`${URL_SEARCH}?q=${encodeURIComponent(q)}`);
-      const ul = document.getElementById('list'+side);
-      ul.innerHTML = '';
+      const ul = document.getElementById('listA');
+      ul.innerHTML='';
       (res.data||[]).forEach(d=>{
-        const li = document.createElement('li');
-        li.innerHTML = `<label><input type="radio" name="dev${side}" value="${d.id}">
-            ${d.name} <span class="muted">(${d.model_code||''})</span></label>`;
+        const li=document.createElement('li');
+        li.innerHTML=`<label><input type="radio" name="devA" value="${d.id}">${d.name} <span class="muted">(${d.model_code||''})</span></label>`;
         ul.appendChild(li);
       });
-      // 重绑选择事件
-      ul.onchange = ()=>{
-        const v = ul.querySelector(`input[name="dev${side}"]:checked`)?.value;
-        if (side==='A') { selA = v?Number(v):null; pickA=null; document.getElementById('candA').innerHTML=''; }
-        else { selB = v?Number(v):null; pickB=null; document.getElementById('candB').innerHTML=''; }
-        document.getElementById('pairInfo').textContent='';
-        document.getElementById('btnMake').disabled = !(pickA && pickB);
+      ul.onchange = async ()=>{
+        const v = ul.querySelector('input[name="devA"]:checked')?.value;
+        selA = v?Number(v):null;
+        await loadPorts();
       };
-    }catch(e){
-      alert('搜索失败：'+e);
-    }
+    }catch(e){ alert('搜索失败：'+e); }
   }
 
-  // 候选端口
-  async function loadCandidates(){
-    try{
-      document.getElementById('candA').innerHTML='';
-      document.getElementById('candB').innerHTML='';
-      document.getElementById('pairInfo').textContent='';
-      pickA = pickB = null;
-      document.getElementById('btnMake').disabled = true;
-
-      if(!selA || !selB){ alert('请先选择两台设备'); return; }
-      if(selA === selB){ alert('不能选择同一台设备作为 A 和 B'); return; }
-
-      const r = await j(`${URL_CAND}?a=${selA}&b=${selB}`);
-      if(!r.ok){ alert(r.err||'加载失败'); return; }
-      const L = r.data.left||[], R = r.data.right||[];
-      renderCand('A', L); renderCand('B', R);
-      document.getElementById('pairInfo').textContent = `候选：A ${L.length} 个；B ${R.length} 个`;
-      await refreshLinks(); // 刷新已连接
-    }catch(e){
-      alert('加载候选失败：'+e);
-    }
+  // 加载设备A端口及连接
+  async function loadPorts(){
+    const wrap = document.getElementById('ports');
+    wrap.innerHTML='';
+    if(!selA) return;
+    const r = await j(URL_PORTS(selA));
+    if(!r.ok){ alert(r.err||'加载端口失败'); return; }
+    renderPorts(r.data||[]);
   }
 
-  function renderCand(side, rows){
-    const ul = document.getElementById('cand'+side); ul.innerHTML='';
-    const grp = {};
-    rows.forEach(x=>{
-      const t = x.port_type_name || '未分类';
-      const a = x.attr_name      || '（未命名属性）';
-      (grp[t] = grp[t] || ({}));
-      (grp[t][a] = grp[t][a] || []).push(x);
+  function renderPorts(rows){
+    const wrap = document.getElementById('ports'); wrap.innerHTML='';
+    const grp={};
+    rows.forEach(p=>{
+      const t=p.port_type_name||'未分类';
+      const a=p.attr_name||'（未命名属性）';
+      (grp[t]=grp[t]||{}); (grp[t][a]=grp[t][a]||[]).push(p);
     });
     Object.keys(grp).forEach(t=>{
-      const liT = document.createElement('li'); liT.innerHTML = `<strong>${t}</strong>`;
-      const ulA = document.createElement('ul');
+      const detT=document.createElement('details'); detT.open=true;
+      detT.innerHTML=`<summary>${t}</summary>`;
       Object.keys(grp[t]).forEach(a=>{
-        const liA = document.createElement('li'); liA.innerHTML = `<span>${a}</span>`;
-        const ulP = document.createElement('ul');
+        const detA=document.createElement('details'); detA.open=true;
+        detA.innerHTML=`<summary>${a}</summary>`;
+        const ul=document.createElement('ul');
         grp[t][a].forEach(p=>{
-          const disabled = !!p.occupied;
-          const liP = document.createElement('li');
-          liP.innerHTML = `<label style="${disabled?'color:#aaa;':''}">
-             <input type="radio" name="port${side}" value="${p.port_id}" ${disabled?'disabled':''}>
-             <code>${p.name}</code>${p.direction ? `<span class="muted"> / ${p.direction}</span>` : ''}
-          </label>`;
-          ulP.appendChild(liP);
+          const li=document.createElement('li');
+          li.innerHTML=`<code>${p.name}</code>`;
+          const span=document.createElement('span'); span.style.marginLeft='8px';
+          if(p.link_id){
+            span.innerHTML=`<code>${p.target_device_name}</code>/<code>${p.target_port_name}</code> <button class="btn danger" data-link-id="${p.link_id}">断开</button>`;
+          }else{
+            span.innerHTML=`<input type="text" class="searchTarget" data-port-id="${p.port_id}" placeholder="设备编号" list="dl-${p.port_id}" style="width:150px;"> <datalist id="dl-${p.port_id}"></datalist>`;
+          }
+          li.appendChild(span);
+          ul.appendChild(li);
         });
-        liA.appendChild(ulP); ulA.appendChild(liA);
+        detA.appendChild(ul);
+        detT.appendChild(detA);
       });
-      liT.appendChild(ulA); ul.appendChild(liT);
+      wrap.appendChild(detT);
     });
+  }
 
-    // 重绑选择事件
-    ul.onchange = ()=>{
-      const v = ul.querySelector(`input[name="port${side}"]:checked`)?.value;
-      if (side==='A') pickA = v?Number(v):null;
-      else            pickB = v?Number(v):null;
-      document.getElementById('btnMake').disabled = !(pickA && pickB);
+  // 搜索目标设备
+  async function doSearchTarget(inp){
+    const portId = Number(inp.dataset.portId);
+    const q = inp.value || '';
+    const dl = document.getElementById('dl-'+portId);
+    const res = await j(`${URL_SEARCH}?q=${encodeURIComponent(q)}`);
+    dl.innerHTML='';
+    (res.data||[]).forEach(d=>{
+      const opt=document.createElement('option');
+      opt.value=`${d.id}|${d.name}`;
+      opt.textContent=`${d.name} (${d.model_code||''})`;
+      dl.appendChild(opt);
+    });
+  }
+  const searchTargetDebounced = debounce(doSearchTarget,200);
+
+  async function chooseTarget(inp){
+    const portId = Number(inp.dataset.portId);
+    const val = inp.value;
+    const tgtId = parseInt(val.split('|')[0]);
+    if(!tgtId) return;
+    const r = await j(`${URL_CAND}?a=${selA}&b=${tgtId}`);
+    if(!r.ok){ alert(r.err||'加载端口失败'); return; }
+    const left = r.data.left||[], right = r.data.right||[];
+    const me = left.find(p=>p.port_id==portId);
+    if(!me){ alert('该端口无法与目标设备连接'); return; }
+    const matches = right.filter(p=>p.port_type_id==me.port_type_id && (p.attr_name||'')==(me.attr_name||'') && !p.occupied);
+    if(!matches.length){ alert('目标设备无可用端口'); return; }
+    const sel=document.createElement('select');
+    sel.innerHTML='<option value="">(选择端口)</option>'+matches.map(p=>`<option value="${p.port_id}">${p.name}</option>`).join('');
+    sel.onchange = async ()=>{
+      const bpid = Number(sel.value);
+      if(!bpid) return;
+      const rr = await jp(URL_MAKE, {a_port_id: portId, b_port_id: bpid});
+      if(!rr.ok){ alert(rr.err||'连接失败'); return; }
+      await loadPorts();
     };
+    inp.replaceWith(sel);
   }
 
-  async function makeLink(){
-    try{
-      if(!pickA || !pickB){ alert('请先在左右各选择一个端口'); return; }
-      const r = await jp(URL_MAKE, {a_port_id: pickA, b_port_id: pickB});
-      document.getElementById('msg').textContent = r.ok ? '已建立连接' : ('失败：'+(r.err||''));
-      if(r.ok){
-        pickA = pickB = null;
-        document.getElementById('btnMake').disabled = true;
-        await loadCandidates(); // 重新拉候选与已连接
-      }
-    }catch(e){
-      alert('建立连接失败：'+e);
-    }
+  async function disconnect(ev){
+    const btn = ev.target.closest('button[data-link-id]');
+    if(!btn) return;
+    if(!confirm('确认断开该连接？')) return;
+    const r = await jp(URL_DEL(btn.dataset.linkId), {});
+    if(!r.ok){ alert(r.err||'断开失败'); return; }
+    await loadPorts();
   }
 
-  async function refreshLinks(){
-    try{
-      const r = await j(URL_LINKS);
-      const ul = document.getElementById('links'); ul.innerHTML='';
-      (r.data||[]).forEach(L=>{
-        const li = document.createElement('li');
-        li.innerHTML = `
-          #${L.id}
-          <code>${L.a_device_name}</code>/<code>${L.a_port_name}</code>
-          &nbsp;⇄&nbsp;
-          <code>${L.b_device_name}</code>/<code>${L.b_port_name}</code>
-          <span class="muted">[${L.status}]</span>
-          <button class="btn danger" style="margin-left:8px" data-link-id="${L.id}">断开</button>
-        `;
-        ul.appendChild(li);
-      });
-      // 统一事件代理
-      ul.onclick = async (ev)=>{
-        const btn = ev.target.closest('button[data-link-id]');
-        if(!btn) return;
-        const id = btn.getAttribute('data-link-id');
-        if(!confirm('确认断开该连接？')) return;
-        try{
-          const rr = await jp(URL_DEL(id), {});
-          if(!rr.ok){ alert(rr.err||'删除失败'); return; }
-          await loadCandidates();
-        }catch(e){ alert('删除失败：'+e); }
-      };
-    }catch(e){
-      alert('刷新连接列表失败：'+e);
-    }
-  }
+  document.getElementById('btnSearchA').onclick = searchDev;
+  document.getElementById('qA').addEventListener('input', debounce(searchDev,200));
+  document.getElementById('ports').addEventListener('input', ev=>{
+    if(ev.target.classList.contains('searchTarget')) searchTargetDebounced(ev.target);
+  });
+  document.getElementById('ports').addEventListener('change', ev=>{
+    if(ev.target.classList.contains('searchTarget')) chooseTarget(ev.target);
+  });
+  document.getElementById('ports').addEventListener('click', disconnect);
 
-  // 绑定事件（确保多次可触发）
-  document.getElementById('btnSearchA').onclick = ()=>searchDev('A');
-  document.getElementById('btnSearchB').onclick = ()=>searchDev('B');
-  document.getElementById('qA').addEventListener('input', debounce(()=>searchDev('A'), 200));
-  document.getElementById('qB').addEventListener('input', debounce(()=>searchDev('B'), 200));
-  document.getElementById('btnLoad').onclick = loadCandidates;
-  document.getElementById('btnMake').onclick = makeLink;
-
-  // 暴露到全局（某些环境下需要）
-  window._connectPage = { searchDev, loadCandidates, makeLink, refreshLinks };
-
-  // 首次加载：空查询 => 全部设备；同时加载当前连接
-  searchDev('A'); searchDev('B');
-  refreshLinks();
+  // 初始加载：空查询列出全部设备
+  searchDev();
 })();
 </script>
 
@@ -231,6 +172,7 @@ ul.tree { list-style: none; padding-left: 1em; }
 ul.tree > li { margin: .25em 0; }
 ul.tree li ul { margin-top: .25em; padding-left: 1.2em; border-left: 2px solid #eee; }
 ul.tree code { padding: 0 .25em; background:#f5f5f5; border-radius:4px; }
-.grid-2 { display:grid; grid-template-columns: 1fr 1fr; }
+details { margin: .25em 0; }
 </style>
 {% endblock %}
+

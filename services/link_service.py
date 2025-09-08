@@ -28,6 +28,75 @@ def _is_port_occupied(project_id: int, port_id: int) -> bool:
         return int(row.get("c", 0)) >= int(row.get("max_links") or 1)
 
 
+# ================== 单设备端口列表 ==================
+
+def list_ports_with_links(project_id: int, device_id: int) -> List[Dict[str, Any]]:
+    """返回设备的所有端口及其连接信息。"""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT p.id AS port_id, p.name, p.port_type_id,
+                   pt.name AS attr_name, tpt.name AS port_type_name
+            FROM port p
+            LEFT JOIN port_template pt ON pt.id = p.port_template_id
+            LEFT JOIN port_type tpt ON tpt.id = p.port_type_id
+            JOIN device d ON d.id = p.device_id
+            WHERE d.project_id=%s AND d.id=%s AND p.is_active=1
+            ORDER BY p.id ASC
+            """,
+            (project_id, device_id),
+        )
+        ports = cur.fetchall() or []
+        if not ports:
+            return []
+
+        port_ids = [int(p["port_id"]) for p in ports]
+        placeholders = ",".join(["%s"] * len(port_ids))
+        cur.execute(
+            f"""
+            SELECT l.id AS link_id, l.a_port_id, l.b_port_id,
+                   da.id AS a_device_id, da.name AS a_device_name, la.name AS a_port_name,
+                   db.id AS b_device_id, db.name AS b_device_name, lb.name AS b_port_name
+            FROM link l
+            JOIN port la ON la.id = l.a_port_id
+            JOIN device da ON da.id = l.a_device_id
+            JOIN port lb ON lb.id = l.b_port_id
+            JOIN device db ON db.id = l.b_device_id
+            WHERE l.project_id=%s AND l.status='CONNECTED'
+              AND (l.a_port_id IN ({placeholders}) OR l.b_port_id IN ({placeholders}))
+            """,
+            [project_id] + port_ids + port_ids,
+        )
+        link_rows = cur.fetchall() or []
+
+    link_map: Dict[int, Dict[str, Any]] = {}
+    for r in link_rows:
+        a_pid = int(r["a_port_id"])
+        b_pid = int(r["b_port_id"])
+        lid = int(r["link_id"])
+        link_map[a_pid] = {
+            "link_id": lid,
+            "target_device_id": r["b_device_id"],
+            "target_device_name": r["b_device_name"],
+            "target_port_id": b_pid,
+            "target_port_name": r["b_port_name"],
+        }
+        link_map[b_pid] = {
+            "link_id": lid,
+            "target_device_id": r["a_device_id"],
+            "target_device_name": r["a_device_name"],
+            "target_port_id": a_pid,
+            "target_port_name": r["a_port_name"],
+        }
+
+    out: List[Dict[str, Any]] = []
+    for p in ports:
+        pid = int(p["port_id"])
+        info = link_map.get(pid) or {}
+        out.append({**p, **info, "occupied": bool(info)})
+    return out
+
+
 # ================== 候选端口 ==================
 
 def find_candidates(project_id: int, device_a_id: int, device_b_id: int) -> Dict[str, List[Dict[str, Any]]]:
