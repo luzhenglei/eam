@@ -26,12 +26,13 @@ def port_tpl_manage(template_id):
         naming_rule = (request.form.get("naming_rule") or "").strip() or None
         sort_order = request.form.get("sort_order", type=int) or 0
         port_type_id = request.form.get("port_type_id", type=int) or None  # 新增
+        max_links = request.form.get("max_links", type=int) or 1
 
         if not code or (qty <= 1 and not name and not naming_rule):
             flash("请至少填写 code；若 qty=1，需要填写 name 或 naming_rule", "error")
         else:
             try:
-                create_port_template(template_id, code, name, qty, naming_rule, sort_order, port_type_id)  # 传入
+                create_port_template(template_id, code, name, qty, naming_rule, sort_order, port_type_id, max_links)  # 传入
                 flash("已新增端口规则", "success")
             except Exception as e:
                 flash(f"新增失败：{e}", "error")

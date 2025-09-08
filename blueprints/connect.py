@@ -2,7 +2,13 @@
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from services.project_service import get_project
 from services.device_service import search_devices_in_project, get_device
-from services.link_service import find_candidates, create_link, delete_link, list_links_in_project
+from services.link_service import (
+    find_candidates,
+    create_link,
+    delete_link,
+    list_links_in_project,
+    list_ports_with_links,
+)
 
 bp_connect = Blueprint("connect_bp", __name__, url_prefix="/projects")
 
@@ -20,6 +26,15 @@ def api_search_devices(pid):
     q = request.args.get("q", "")
     rows = search_devices_in_project(pid, q)
     return jsonify({"ok": True, "data": rows})
+
+# --- AJAX: 单设备端口及连接 ---
+@bp_connect.route("/<int:pid>/api/device/<int:did>/ports")
+def api_device_ports(pid, did):
+    try:
+        rows = list_ports_with_links(pid, did)
+        return jsonify({"ok": True, "data": rows})
+    except Exception as e:
+        return jsonify({"ok": False, "err": str(e)})
 
 # --- AJAX: 候选端口（两台设备） ---
 @bp_connect.route("/<int:pid>/api/candidates")
