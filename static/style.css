@@ -21,4 +21,27 @@
 .pager .current{background:#2563eb;color:#fff;border-color:#2563eb}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem}
 .filters{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0}
+/* 子分组（属性）折叠 */
+.sub-head {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:6px 0;
+  cursor:pointer;                 /* ★ 整行可点击 */
+}
+.sub-title { display:flex; align-items:center; gap:8px; font-weight:600; color:#374151; }
+.sub-title .count { font-size:12px; color:#6b7280; background:#f3f4f6; padding:2px 6px; border-radius:999px; }
+
+.sub-body { padding: 4px 0 8px; }
+.sub-group[data-collapsed="true"] .sub-body { display:none; }
+
+/* 让 chevron 在子组也有旋转反馈 */
+.sub-group .chevron { width:24px; height:24px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; position:relative; }
+.sub-group .chevron::after {
+  content:''; position:absolute; top:50%; left:50%; width:7px; height:7px;
+  border-right:2px solid #111827; border-bottom:2px solid #111827;
+  transform: translate(-50%,-60%) rotate(45deg); transition: transform .18s ease;
+}
+.sub-group[data-collapsed="true"] .chevron::after { transform: translate(-50%,-40%) rotate(-135deg); }
+
+/* 大组头也设成可点击（视觉反馈可选） */
+.group-header { cursor: pointer; }    /* ★ 整行可点击 */
 

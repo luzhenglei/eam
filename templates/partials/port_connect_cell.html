@@ -1,0 +1,170 @@
+<!-- templates/partials/port_connect_cell.html -->
+<div class="connect-cell" data-port-id="{{ port.id }}" data-project-id="{{ project_id }}">
+  <div class="group-card" data-collapsed="false">
+    <div class="group-header">
+      <div class="title">
+        <span class="dot"></span>
+        <span class="text">端口：{{ port.name }}</span>
+        <span class="count">已连 {{ port.conn_count }}/{{ port.max_links }}</span>
+        {% if port.is_active == 0 %}
+          <span class="badge badge-red">已关闭</span>
+        {% endif %}
+      </div>
+      <button class="chevron" aria-label="toggle"></button>
+    </div>
+
+    <div class="group-body">
+      <div class="connect-actions">
+        <input
+          type="text"
+          class="candidate-input"
+          placeholder="搜索设备/端口以连线"
+          {% if port.is_active == 0 or port.conn_count >= port.max_links %}disabled{% endif %}
+        />
+        <button
+          class="btn btn-primary connect-btn"
+          {% if port.is_active == 0 or port.conn_count >= port.max_links %}disabled{% endif %}
+        >连线</button>
+
+        <button class="btn btn-ghost toggle-btn">
+          {% if port.is_active == 1 %}关闭端口{% else %}开启端口{% endif %}
+        </button>
+      </div>
+
+      <ul class="current-links">
+        {% for link in port.links %}
+          <li>
+            <span class="chip">{{ link.other_device_name }} / {{ link.other_port_name }}</span>
+            <!-- 可在此添加“断开”按钮 -->
+          </li>
+        {% endfor %}
+      </ul>
+
+      <div class="dropdown" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // 折叠
+  document.querySelectorAll('.group-card .chevron').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const card = btn.closest('.group-card');
+      const collapsed = card.getAttribute('data-collapsed') === 'true';
+      card.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+    });
+  });
+
+  const debounce = (fn, d=250) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), d); }; };
+
+  document.querySelectorAll('.connect-cell').forEach(cell=>{
+    const projectId = parseInt(cell.dataset.projectId,10);
+    const sourcePortId = parseInt(cell.dataset.portId,10);
+    const input = cell.querySelector('.candidate-input');
+    const dropdown = cell.querySelector('.dropdown');
+    const btnConnect = cell.querySelector('.connect-btn');
+    const btnToggle  = cell.querySelector('.toggle-btn');
+
+    if(input){
+      input.addEventListener('input', debounce(async ()=>{
+        if(input.disabled) return;
+        const q = input.value.trim();
+        const url = `/connect/candidates?project_id=${projectId}&source_port_id=${sourcePortId}&q=${encodeURIComponent(q)}`;
+        try{
+          const res = await fetch(url);
+          const data = await res.json();
+          if(!data.ok) throw new Error(data.error || '候选获取失败');
+          dropdown.innerHTML = '';
+          (data.items||[]).forEach(it=>{
+            const opt = document.createElement('div');
+            opt.className = 'dropdown-item';
+            opt.textContent = `${it.device_name} / ${it.port_name}`;
+            opt.dataset.portId = it.port_id;
+            dropdown.appendChild(opt);
+          });
+          dropdown.style.display = (data.items||[]).length ? 'block' : 'none';
+        }catch(err){
+          dropdown.style.display = 'none';
+        }
+      }, 200));
+
+      dropdown.addEventListener('click', e=>{
+        const item = e.target.closest('.dropdown-item');
+        if(!item) return;
+        input.value = item.textContent;
+        input.dataset.selectedPortId = item.dataset.portId;
+        dropdown.style.display = 'none';
+      });
+    }
+
+    if(btnConnect){
+      btnConnect.addEventListener('click', async ()=>{
+        if(btnConnect.disabled) return;
+        const toPortId = parseInt(input?.dataset.selectedPortId || '0', 10);
+        if(!toPortId){ alert('请先在下拉中选择一个端口'); return; }
+        btnConnect.disabled = true;
+        try{
+          const res = await fetch('/connect/create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_id: projectId, from_port_id: sourcePortId, to_port_id: toPortId})
+          });
+          const data = await res.json();
+          if(!data.ok) throw new Error(data.error || '连线失败');
+          location.reload();
+        }catch(err){ alert(err.message); }
+        finally{ btnConnect.disabled = false; }
+      });
+    }
+
+    if(btnToggle){
+      btnToggle.addEventListener('click', async ()=>{
+        btnToggle.disabled = true;
+        try{
+          const res = await fetch(`/connect/ports/${sourcePortId}/toggle`, {method:'POST'});
+          const data = await res.json();
+          if(!data.ok) throw new Error(data.error || '切换失败');
+          location.reload();
+        }catch(err){ alert(err.message); }
+        finally{ btnToggle.disabled = false; }
+      });
+    }
+  });
+})();
+</script>
+
+<style>
+.connect-cell { padding: 8px 0; position: relative; }
+.badge { font-size: 12px; padding: 2px 6px; border-radius: 999px; background: #eef2ff; }
+.badge-red { background:#fee2e2; }
+.chip { background:#f3f4f6; border-radius: 12px; padding: 2px 8px; font-size:12px; }
+
+.group-card { border:1px solid #e5e7eb; border-radius:14px; margin:12px 0; overflow:hidden; background:#fff; }
+.group-header { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; cursor:pointer; }
+.group-header:hover { background:#fafafa; }
+.title { display:flex; align-items:center; gap:10px; font-weight:600; }
+.title .dot { width:8px; height:8px; border-radius:999px; background:#10b981; }
+.title .count { font-weight:500; font-size:12px; color:#6b7280; background:#f3f4f6; padding:2px 6px; border-radius:999px; }
+.chevron { width:28px; height:28px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; position:relative; }
+.chevron::after {
+  content:''; position:absolute; top:50%; left:50%; width:8px; height:8px; border-right:2px solid #111827; border-bottom:2px solid #111827; transform: translate(-50%,-60%) rotate(45deg); transition: transform .18s ease;
+}
+.group-card[data-collapsed="true"] .chevron::after { transform: translate(-50%,-40%) rotate(-135deg); }
+.group-body { padding: 8px 14px 14px; border-top:1px solid #e5e7eb; }
+.group-card[data-collapsed="true"] .group-body { display:none; }
+
+.connect-actions { display:flex; gap:8px; align-items:center; margin:8px 0; }
+.candidate-input { min-width: 260px; padding: 6px 8px; }
+.btn { padding:6px 10px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; cursor:pointer; }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn-primary { background:#111827; color:#fff; border-color:#111827; }
+.btn-ghost { background:transparent; }
+
+.dropdown { position:absolute; background:#fff; border:1px solid #e5e7eb; border-radius:8px; margin-top:4px; min-width: 260px; box-shadow: 0 8px 20px rgba(0,0,0,.08); z-index: 30; }
+.dropdown-item { padding: 8px 10px; cursor: pointer; }
+.dropdown-item:hover { background:#f3f4f6; }
+
+.current-links { margin:6px 0 0; padding-left: 16px; }
+.current-links li { margin:4px 0; }
+</style>

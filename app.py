@@ -9,10 +9,9 @@ from blueprints.templates_admin import bp_templates_admin
 from blueprints.devices import bp_devices
 from blueprints.port_template import tpl_bp
 from blueprints.port_types import bp_port_types
-from blueprints.connect import bp_connect
 from blueprints.projects import bp_projects
 from blueprints.cables import bp_cables
-from blueprints.connect import bp_connect
+from blueprints.connect import connect_bp
 from blueprints.ports import bp_ports
 
 
@@ -27,7 +26,7 @@ def create_app():
     app.register_blueprint(bp_devices)
     app.register_blueprint(tpl_bp)
     app.register_blueprint(bp_port_types)
-    app.register_blueprint(bp_connect)
+    app.register_blueprint(connect_bp)
     app.register_blueprint(bp_projects)
     app.register_blueprint(bp_cables)
     app.register_blueprint(bp_ports)

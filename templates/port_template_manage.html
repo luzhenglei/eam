@@ -77,28 +77,210 @@
 </table>
 
 <h3 style="margin-top:16px;">预览：本模板将生成的端口</h3>
-<ul class="tree">
-  {% for r in rows %}
-    <li>
-      <strong>{{ r.code }}</strong>
-      {% if r.port_type_name %}<span class="muted"> · {{ r.port_type_name }}</span>{% endif %}
-      <ul>
-        {% set qty = (r.qty|int if r.qty is not none else 1) %}
-        {% set base = (r.code or '') %}
-        {% if qty < 1 %}
-          <li class="muted">数量无效（应 ≥ 1）</li>
-        {% else %}
-          {% for i in range(1, qty + 1) %}
-            <li>{{ base ~ i }}</li>
-          {% endfor %}
-        {% endif %}
-      </ul>
-    </li>
-  {% endfor %}
-  {% if not rows %}
-    <li class="muted">暂无可预览端口</li>
-  {% endif %}
-</ul>
+
+<section class="card">
+  <div class="card-head">
+    <div class="title">
+      <span class="dot"></span>
+      <span></span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnPreview">刷新预览</button>
+    </div>
+  </div>
+  <div id="rulePreview"></div>
+</section>
 
 <p class="muted">提示：进入设备“编辑属性”时会按上述规则增量补齐端口（不会删除已有端口）。</p>
+
+<script>
+(function(){
+  // 取后端 rows（每行是一条规则：code/属性名/类型/数量…）
+  const RULES = {{ rows | tojson | safe }};
+
+  // 工具
+  const toInt = (v,d)=>{ const n=parseInt(v,10); return Number.isFinite(n)?n:d; };
+  const pad = (num,width)=>{ const s=String(num); return s.length>=width?s:('0'.repeat(width-s.length)+s); };
+
+  // 把一条规则展开为端口名数组（PW + 1..qty）
+  function expandRule(r){
+    const qty = Math.max(0, toInt(r.qty, 0));
+    // 你现在的规则是“标签 + 序号”：下面保留这个逻辑
+    const base = (r.code || '').trim();
+    const ports = [];
+    for(let i=1; i<=qty; i++){
+      ports.push({
+        port_type_name: r.port_type_name || '未分类',
+        attr_name: r.name || '（未命名属性）',
+        name: `${base}${i}`,
+        _rule_id: r.id
+      });
+    }
+    return ports;
+  }
+
+  function render(){
+    const wrap = document.getElementById('rulePreview');
+    wrap.innerHTML = '';
+
+    // 展开所有规则为“端口”数组
+    let ports = [];
+    (RULES || []).forEach(r => {
+      ports = ports.concat(expandRule(r));
+    });
+
+    if(!ports.length){
+      wrap.innerHTML = '<div style="padding:12px;color:#6b7280;">暂无可预览端口</div>';
+      return;
+    }
+
+    // 分组：端口类型 -> 属性
+    const grp = {};
+    ports.forEach(p=>{
+      const t = p.port_type_name || '未分类';
+      const a = p.attr_name || '（未命名属性）';
+      (grp[t] = grp[t] || {});
+      (grp[t][a] = grp[t][a] || []).push(p);
+    });
+
+    // 构建 DOM（与连接配置页风格一致）
+    Object.keys(grp).forEach(t=>{
+      const card = document.createElement('div');
+      card.className = 'group-card';
+      card.setAttribute('data-collapsed','false');
+
+      const head = document.createElement('div');
+      head.className = 'group-header';
+      const typeCount = Object.values(grp[t]).reduce((s,arr)=>s+arr.length,0);
+      head.innerHTML = `
+        <div class="title">
+          <span class="dot"></span>
+          <span class="text">${t}</span>
+          <span class="count">${typeCount}</span>
+        </div>
+        <button class="chevron" aria-label="toggle"></button>
+      `;
+      card.appendChild(head);
+
+      const body = document.createElement('div');
+      body.className = 'group-body';
+
+      Object.keys(grp[t]).forEach(a=>{
+        const sub = document.createElement('div');
+        sub.className = 'sub-group';
+        sub.setAttribute('data-collapsed','false');
+
+        const subHead = document.createElement('div');
+        subHead.className = 'sub-head';
+        subHead.innerHTML = `
+          <div class="sub-title">
+            <span class="label">${a}</span>
+            <span class="count">${grp[t][a].length}</span>
+          </div>
+          <button class="chevron" aria-label="toggle"></button>
+        `;
+        sub.appendChild(subHead);
+
+        const subBody = document.createElement('div');
+        subBody.className = 'sub-body';
+
+        const list = document.createElement('ul');
+        list.className = 'port-list';
+        grp[t][a].forEach(p=>{
+          const li = document.createElement('li');
+          li.className = 'port-row';
+          li.innerHTML = `
+            <div class="left">
+              <code>${p.name}</code>
+            </div>
+          `;
+          list.appendChild(li);
+        });
+
+        subBody.appendChild(list);
+        sub.appendChild(subBody);
+        body.appendChild(sub);
+      });
+
+      card.appendChild(body);
+      wrap.appendChild(card);
+    });
+
+    // 事件委托：整行可点击折叠
+    wrap.addEventListener('click', function onClick(ev){
+      const isInteractive = ['BUTTON','INPUT','SELECT','TEXTAREA','LABEL'].includes(ev.target.tagName);
+      if (isInteractive) return;
+
+      if (ev.target.classList.contains('chevron')){
+        const group = ev.target.closest('.group-card, .sub-group');
+        if (group){
+          const collapsed = group.getAttribute('data-collapsed') === 'true';
+          group.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+        }
+        return;
+      }
+
+      const gh = ev.target.closest('.group-header');
+      if (gh){
+        const card = gh.closest('.group-card');
+        const collapsed = card.getAttribute('data-collapsed') === 'true';
+        card.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+        return;
+      }
+      const sh = ev.target.closest('.sub-head');
+      if (sh){
+        const sub = sh.closest('.sub-group');
+        const collapsed = sub.getAttribute('data-collapsed') === 'true';
+        sub.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+        return;
+      }
+    }, { once:true });
+  }
+
+  // 初次渲染 & 手动刷新
+  render();
+  document.getElementById('btnPreview')?.addEventListener('click', render);
+}());
+</script>
+
+<style>
+/* 可复用你现有的样式；这边补上必要项，避免样式缺失 */
+.card { border:1px solid #e5e7eb; border-radius:14px; margin:12px 0; background:#fff; }
+.card-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #e5e7eb; }
+.card .title { display:flex; gap:10px; align-items:center; font-weight:600; }
+.card .actions { display:flex; gap:8px; align-items:center; }
+.dot { width:8px; height:8px; border-radius:999px; background:#111827; display:inline-block; }
+
+.group-card { border-top:1px solid #e5e7eb; }
+.group-header { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; cursor:pointer; }
+.group-header:hover { background:#fafafa; }
+.group-header .title { display:flex; align-items:center; gap:10px; font-weight:600; }
+.group-header .count { font-weight:500; font-size:12px; color:#6b7280; background:#f3f4f6; padding:2px 6px; border-radius:999px; }
+.chevron { width:28px; height:28px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; position:relative; }
+.chevron::after{
+  content:''; position:absolute; top:50%; left:50%; width:8px; height:8px;
+  border-right:2px solid #111827; border-bottom:2px solid #111827;
+  transform: translate(-50%,-60%) rotate(45deg); transition: transform .18s ease;
+}
+.group-card[data-collapsed="true"] .chevron::after { transform: translate(-50%,-40%) rotate(-135deg); }
+.group-body { padding: 8px 14px 14px; border-top:1px solid #e5e7eb; }
+.group-card[data-collapsed="true"] .group-body { display:none; }
+
+.sub-group { margin: 6px 0 10px; }
+.sub-head { display:flex; justify-content:space-between; align-items:center; padding:6px 0; cursor:pointer; }
+.sub-title { display:flex; align-items:center; gap:8px; font-weight:600; color:#374151; }
+.sub-title .count { font-size:12px; color:#6b7280; background:#f3f4f6; padding:2px 6px; border-radius:999px; }
+
+.sub-body { padding: 4px 0 8px; }
+.sub-group[data-collapsed="true"] .sub-body { display:none; }
+
+.port-list { list-style:none; margin:0; padding:0; }
+.port-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #eee; gap:12px; }
+.port-row:last-child { border-bottom:none; }
+.port-row .left { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.port-row .left code { padding: 0 .25em; background:#f5f5f5; border-radius:4px; }
+
+.btn { padding:6px 10px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; cursor:pointer; }
+</style>
+
 {% endblock %}

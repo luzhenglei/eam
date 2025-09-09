@@ -3,25 +3,42 @@
 {% block content %}
 <h2>连接配置 · 项目：{{ project.name }}</h2>
 
-<!-- 常量 URL 与 PID -->
+<!-- 常量 URL 与 PID（沿用你现有的 connect_bp 路由） -->
 <script>
   const PID = Number('{{ project.id }}');
   const URL_SEARCH = "{{ url_for('connect_bp.api_search_devices', pid=project.id) }}";
   const URL_CAND   = "{{ url_for('connect_bp.api_candidates',    pid=project.id) }}";
   const URL_MAKE   = "{{ url_for('connect_bp.api_make_link',     pid=project.id) }}";
   const URL_PORTS  = (id) => "{{ url_for('connect_bp.api_device_ports', pid=project.id, did=0) }}".replace('/0/','/'+id+'/');
-  const URL_DEL    = (id) => "{{ url_for('connect_bp.api_delete_link', pid=project.id, link_id=0) }}".replace('/0/','/'+id+'/');
+  const URL_DEL = (id) => "{{ url_for('connect_bp.api_delete_link', pid=project.id, link_id=0) }}".replace('/0', '/'+id);
+
+  // 端口开关切换：这里用的是我之前提供的 /connect/ports/<id>/toggle
+  const URL_TOGGLE = (portId) => `/connect/ports/${portId}/toggle`;
 </script>
 
-<section>
-  <h3>设备 A</h3>
-  <input id="qA" type="text" placeholder="按设备编号/型号搜索">
-  <button class="btn" id="btnSearchA">搜索</button>
+<section class="card">
+  <div class="card-head">
+    <div class="title">
+      <span class="dot"></span>
+      <span>选择设备 A（源设备）</span>
+    </div>
+    <div class="actions">
+      <input id="qA" type="text" placeholder="按设备编号/型号搜索">
+      <button class="btn" id="btnSearchA">搜索</button>
+    </div>
+  </div>
   <ul id="listA" class="tree"></ul>
 </section>
 
-<h3 style="margin-top:16px;">端口</h3>
-<div id="ports"></div>
+<section class="card">
+  <div class="card-head">
+    <div class="title">
+      <span class="dot green"></span>
+      <span>端口（设备 A）</span>
+    </div>
+  </div>
+  <div id="ports"></div>
+</section>
 
 <script>
 (() => {
@@ -37,9 +54,9 @@
     });
     return await r.json();
   }
-  const debounce = (fn, wait=200) => { let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; };
+  const debounce = (fn, wait=240) => { let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); }; };
 
-  // 搜索设备A
+  // --- 搜索设备A（排除自身设备逻辑用于目标搜索里，这里不需要） ---
   async function searchDev(){
     try{
       const q = document.getElementById('qA').value || '';
@@ -59,7 +76,7 @@
     }catch(e){ alert('搜索失败：'+e); }
   }
 
-  // 加载设备A端口及连接
+  // --- 加载设备A端口及连接（保持你现有接口结构） ---
   async function loadPorts(){
     const wrap = document.getElementById('ports');
     wrap.innerHTML='';
@@ -69,82 +86,225 @@
     renderPorts(r.data||[]);
   }
 
-  function renderPorts(rows){
-    const wrap = document.getElementById('ports'); wrap.innerHTML='';
-    const grp={};
-    rows.forEach(p=>{
-      const t=p.port_type_name||'未分类';
-      const a=p.attr_name||'（未命名属性）';
-      (grp[t]=grp[t]||{}); (grp[t][a]=grp[t][a]||[]).push(p);
-    });
-    Object.keys(grp).forEach(t=>{
-      const detT=document.createElement('details'); detT.open=true;
-      detT.innerHTML=`<summary>${t}</summary>`;
-      Object.keys(grp[t]).forEach(a=>{
-        const detA=document.createElement('details'); detA.open=true;
-        detA.innerHTML=`<summary>${a}</summary>`;
-        const ul=document.createElement('ul');
-        grp[t][a].forEach(p=>{
-          const li=document.createElement('li');
-          li.innerHTML=`<code>${p.name}</code>`;
-          const span=document.createElement('span'); span.style.marginLeft='8px';
-          if(p.link_id){
-            span.innerHTML=`<code>${p.target_device_name}</code>/<code>${p.target_port_name}</code> <button class="btn danger" data-link-id="${p.link_id}">断开</button>`;
-          }else{
-            span.innerHTML=`<input type="text" class="searchTarget" data-port-id="${p.port_id}" placeholder="设备编号" list="dl-${p.port_id}" style="width:150px;"> <datalist id="dl-${p.port_id}"></datalist>`;
-          }
-          li.appendChild(span);
-          ul.appendChild(li);
-        });
-        detA.appendChild(ul);
-        detT.appendChild(detA);
-      });
-      wrap.appendChild(detT);
-    });
-  }
+  // 渲染端口块：重做折叠样式 + 输入框常显 + 支持“关闭/开启端口” + （可选）禁用控制
+function renderPorts(rows){
+  const wrap = document.getElementById('ports');
+  wrap.innerHTML = '';
 
-  // 搜索目标设备
-  async function doSearchTarget(inp){
-    const portId = Number(inp.dataset.portId);
-    const q = inp.value || '';
-    const dl = document.getElementById('dl-'+portId);
-    const res = await j(`${URL_SEARCH}?q=${encodeURIComponent(q)}`);
-    dl.innerHTML='';
-    (res.data||[]).forEach(d=>{
-      const opt=document.createElement('option');
-      opt.value=`${d.id}|${d.name}`;
-      opt.textContent=`${d.name} (${d.model_code||''})`;
-      dl.appendChild(opt);
+  // 分组：端口类型 -> 属性
+  const grp = {};
+  (rows || []).forEach(p => {
+    const t = p.port_type_name || '未分类';
+    const a = p.attr_name || '（未命名属性）';
+    (grp[t] = grp[t] || {});
+    (grp[t][a] = grp[t][a] || []).push(p);
+  });
+
+  // 外层：端口类型分组卡片
+  Object.keys(grp).forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'group-card';
+    card.setAttribute('data-collapsed','false');
+
+    const head = document.createElement('div');
+    head.className = 'group-header';
+    const typeCount = Object.values(grp[t]).reduce((s, arr) => s + arr.length, 0);
+    head.innerHTML = `
+      <div class="title">
+        <span class="dot"></span>
+        <span class="text">${t}</span>
+        <span class="count">${typeCount}</span>
+      </div>
+      <button class="chevron" aria-label="toggle"></button>
+    `;
+    card.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'group-body';
+
+    // 内层：属性分块
+    Object.keys(grp[t]).forEach(a => {
+      const sub = document.createElement('div');
+      sub.className = 'sub-group';
+      sub.setAttribute('data-collapsed','false');
+
+      const subHead = document.createElement('div');
+      subHead.className = 'sub-head';
+      subHead.innerHTML = `
+        <div class="sub-title">
+          <span class="label">${a}</span>
+          <span class="count">${grp[t][a].length}</span>
+        </div>
+        <button class="chevron" aria-label="toggle"></button>
+      `;
+      sub.appendChild(subHead);
+
+      const subBody = document.createElement('div');
+      subBody.className = 'sub-body';
+
+      const list = document.createElement('ul');
+      list.className = 'port-list';
+
+      grp[t][a].forEach(p => {
+        const maxLinks  = toInt(p.max_links, null);
+        const connCount = toInt(p.conn_count, null);
+        const isActive  = ('is_active' in p) ? toInt(p.is_active, 1) : 1;
+        const reached   = (maxLinks!=null && connCount!=null) ? (connCount >= maxLinks) : false;
+
+        // 只有开启且未满时显示输入区
+        const showBox = isActive && !(maxLinks!=null && connCount!=null && connCount >= maxLinks);
+
+        const li = document.createElement('li');
+        li.className = 'port-row';
+        li.innerHTML = `
+          <div class="left">
+            <code>${p.name}</code>
+            ${p.attr_name ? `<span class="badge">${p.attr_name}</span>` : ''}
+            <span class="meta">ID:${p.port_id || p.id || ''}</span>
+            ${isActive ? '' : '<span class="badge badge-red">已关闭</span>'}
+            ${maxLinks!=null && connCount!=null ? `<span class="badge">已连 ${connCount}/${maxLinks}</span>` : ''}
+          </div>
+          <div class="right">
+            <div class="links"></div>
+            ${
+              showBox
+                ? `
+                  <div class="connect-box">
+                    <input type="text" class="searchTarget" data-port-id="${p.port_id||p.id}" placeholder="目标设备编号" list="dl-${p.port_id||p.id}">
+                    <datalist id="dl-${p.port_id||p.id}"></datalist>
+                    <select class="target-port" data-for-port="${p.port_id||p.id}">
+                      <option value="">(选择目标端口)</option>
+                    </select>
+                    <button class="btn btn-primary make-link" data-a-port="${p.port_id||p.id}">连线</button>
+                    <button class="btn btn-ghost toggle-port" data-port-id="${p.port_id||p.id}">${isActive ? '关闭端口' : '开启端口'}</button>
+                  </div>
+                `
+                : ''
+            }
+          </div>
+        `;
+
+        // 现有连接展示（兼容数组 links 与单个 link_id 两种结构）
+        const linksBox = li.querySelector('.links');
+        if (Array.isArray(p.links) && p.links.length){
+          p.links.forEach(L => {
+            const item = document.createElement('div');
+            item.className = 'link-item';
+            item.innerHTML = `
+              <span class="chip">${L.target_device_name || L.other_device_name || ''} / ${L.target_port_name || L.other_port_name || ''}</span>
+              <button class="btn danger unlink" data-link-id="${L.link_id || L.id}">断开</button>
+            `;
+            linksBox.appendChild(item);
+          });
+        } else if (p.link_id){
+          const item = document.createElement('div');
+          item.className = 'link-item';
+          item.innerHTML = `
+            <span class="chip">${p.target_device_name || ''} / ${p.target_port_name || ''}</span>
+            <button class="btn danger unlink" data-link-id="${p.link_id}">断开</button>
+          `;
+          linksBox.appendChild(item);
+        }
+
+        // 如果你想保留“禁用控件”的保险逻辑，也可在 showBox=false 之外再判断
+        if (!isActive || reached){
+          const inp = li.querySelector('.searchTarget');
+          const sel = li.querySelector('.target-port');
+          const mk  = li.querySelector('.make-link');
+          if (inp) inp.disabled = true;
+          if (sel) sel.disabled = true;
+          if (mk)  mk.disabled  = true;
+        }
+
+        list.appendChild(li);
+      });
+
+      subBody.appendChild(list);
+      sub.appendChild(subBody);
+      body.appendChild(sub);
     });
+
+    card.appendChild(body);
+    wrap.appendChild(card);
+  });
+}
+
+  // ========== 目标设备搜索（排除自身设备A） ==========
+  async function doSearchTarget(inp){
+    const q = inp.value || '';
+    const dl = document.getElementById('dl-'+(inp.dataset.portId));
+    try{
+      const res = await j(`${URL_SEARCH}?q=${encodeURIComponent(q)}`);
+      dl.innerHTML='';
+      (res.data||[])
+        .filter(d => Number(d.id)!==Number(selA)) // 排除自身设备
+        .forEach(d=>{
+          const opt=document.createElement('option');
+          opt.value=`${d.id}|${d.name}`;
+          opt.textContent=`${d.name} (${d.model_code||''})`;
+          dl.appendChild(opt);
+        });
+    }catch(e){
+      // 忽略错误提示，避免打扰
+    }
   }
   const searchTargetDebounced = debounce(doSearchTarget,200);
 
+  // 选择目标设备后，加载候选端口（右侧）
   async function chooseTarget(inp){
-    const portId = Number(inp.dataset.portId);
+    const aPortId = Number(inp.dataset.portId);
     const val = inp.value;
-    const tgtId = parseInt(val.split('|')[0]);
+    const tgtId = parseInt(String(val||'').split('|')[0]);
     if(!tgtId) return;
+
+    // 拉候选端口（你原有 API：?a=<selA>&b=<tgtId>）
     const r = await j(`${URL_CAND}?a=${selA}&b=${tgtId}`);
     if(!r.ok){ alert(r.err||'加载端口失败'); return; }
-    const left = r.data.left||[], right = r.data.right||[];
-    const me = left.find(p=>p.port_id==portId);
+    const left  = r.data.left  || [];
+    const right = r.data.right || [];
+
+    // 找出源端口的“类型与属性”定义
+    const me = left.find(p=> Number(p.port_id)===aPortId );
     if(!me){ alert('该端口无法与目标设备连接'); return; }
-    const matches = right.filter(p=>p.port_type_id==me.port_type_id && (p.attr_name||'')==(me.attr_name||'') && !p.occupied);
-    if(!matches.length){ alert('目标设备无可用端口'); return; }
-    const sel=document.createElement('select');
-    sel.innerHTML='<option value="">(选择端口)</option>'+matches.map(p=>`<option value="${p.port_id}">${p.name}</option>`).join('');
-    sel.onchange = async ()=>{
-      const bpid = Number(sel.value);
-      if(!bpid) return;
-      const rr = await jp(URL_MAKE, {a_port_id: portId, b_port_id: bpid});
-      if(!rr.ok){ alert(rr.err||'连接失败'); return; }
-      await loadPorts();
-    };
-    inp.replaceWith(sel);
+
+    // 目标端口匹配：同 port_type_id + 同 attr_name，并且未占用
+    const matches = right.filter(p=>{
+      const sameType = (p.port_type_id==me.port_type_id);
+      const sameAttr = (String(p.attr_name||'')===String(me.attr_name||''));
+      const idle     = !p.occupied; // 你原来就有这个字段
+      return sameType && sameAttr && idle;
+    });
+
+    // 渲染到该行的 <select.target-port>
+    const sel = inp.parentElement.querySelector(`select.target-port[data-for-port="${aPortId}"]`);
+    sel.innerHTML = '<option value="">(选择目标端口)</option>' + matches.map(p=>(
+      `<option value="${p.port_id}">${p.name}</option>`
+    )).join('');
   }
 
+  // 发起连线
+  async function makeLink(btn){
+    const aPortId = Number(btn.dataset.aPort);
+    const wrap = btn.closest('.connect-box');
+    const sel = wrap.querySelector(`select.target-port[data-for-port="${aPortId}"]`);
+    const bPortId = Number(sel?.value||0);
+    if(!bPortId){ alert('请先选择目标端口'); return; }
+
+    btn.disabled = true;
+    try{
+      const rr = await jp(URL_MAKE, {a_port_id: aPortId, b_port_id: bPortId});
+      if(!rr.ok){ throw new Error(rr.err||'连接失败'); }
+      await loadPorts();
+    }catch(e){
+      alert(e.message||e);
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  // 断开连接
   async function disconnect(ev){
-    const btn = ev.target.closest('button[data-link-id]');
+    const btn = ev.target.closest('button.unlink[data-link-id]');
     if(!btn) return;
     if(!confirm('确认断开该连接？')) return;
     const r = await jp(URL_DEL(btn.dataset.linkId), {});
@@ -152,27 +312,141 @@
     await loadPorts();
   }
 
+  // 开/关端口
+  async function togglePort(btn){
+    const portId = Number(btn.dataset.portId);
+    btn.disabled = true;
+    try{
+      const res = await fetch(URL_TOGGLE(portId), { method:'POST' });
+      const data = await res.json();
+      if(!data.ok) throw new Error(data.error || '切换失败');
+      await loadPorts();
+    }catch(e){
+      alert(e.message||e);
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  // 事件绑定
   document.getElementById('btnSearchA').onclick = searchDev;
   document.getElementById('qA').addEventListener('input', debounce(searchDev,200));
-  document.getElementById('ports').addEventListener('input', ev=>{
+
+  const portsEl = document.getElementById('ports');
+  portsEl.addEventListener('input', ev=>{
     if(ev.target.classList.contains('searchTarget')) searchTargetDebounced(ev.target);
   });
-  document.getElementById('ports').addEventListener('change', ev=>{
+  portsEl.addEventListener('change', ev=>{
     if(ev.target.classList.contains('searchTarget')) chooseTarget(ev.target);
   });
-  document.getElementById('ports').addEventListener('click', disconnect);
+
+  // 先处理功能按钮（连线 / 断开 / 开关端口），处理完就 return
+portsEl.addEventListener('click', (ev) => {
+  const btnMake   = ev.target.closest('.make-link');
+  const btnUnlink = ev.target.closest('.unlink');
+  const btnToggle = ev.target.closest('.toggle-port');
+  if (btnMake)   { makeLink(btnMake);   return; }
+  if (btnUnlink) { disconnect(ev);      return; }
+  if (btnToggle) { togglePort(btnToggle); return; }
+});
+
+  // 折叠：点击整行头部也能触发（而不仅是小按钮）
+portsEl.addEventListener('click', (ev) => {
+  const isInteractive = ['BUTTON','INPUT','SELECT','TEXTAREA','LABEL'].includes(ev.target.tagName);
+  if (isInteractive) return; // 点交互控件时不折叠
+
+  // 点击大组头（端口类型）
+  const gh = ev.target.closest('.group-header');
+  if (gh) {
+    const card = gh.closest('.group-card');
+    const collapsed = card.getAttribute('data-collapsed') === 'true';
+    card.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+    return;
+  }
+
+  // 点击子组头（端口属性）
+  const sh = ev.target.closest('.sub-head');
+  if (sh) {
+    const sub = sh.closest('.sub-group');
+    const collapsed = sub.getAttribute('data-collapsed') === 'true';
+    sub.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+    return;
+  }
+});
+
+// 同时保留原来的按钮点击（可留可去）
+portsEl.addEventListener('click', (ev) => {
+  if (ev.target.classList.contains('chevron')) {
+    const group = ev.target.closest('.group-card, .sub-group');
+    if (group) {
+      const collapsed = group.getAttribute('data-collapsed') === 'true';
+      group.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+    }
+  }
+});
+
 
   // 初始加载：空查询列出全部设备
   searchDev();
+
+  // 小工具
+  function toInt(v, d){ const n = parseInt(v,10); return Number.isFinite(n) ? n : d; }
 })();
 </script>
 
 <style>
-ul.tree { list-style: none; padding-left: 1em; }
+/* 页面骨架 */
+.card { border:1px solid #e5e7eb; border-radius:14px; margin:12px 0; background:#fff; }
+.card-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #e5e7eb; }
+.card .title { display:flex; gap:10px; align-items:center; font-weight:600; }
+.card .actions { display:flex; gap:8px; align-items:center; }
+.dot { width:8px; height:8px; border-radius:999px; background:#111827; display:inline-block; }
+.dot.green { background:#10b981; }
+
+/* 设备A列表 */
+ul.tree { list-style: none; padding: 10px 14px; }
 ul.tree > li { margin: .25em 0; }
-ul.tree li ul { margin-top: .25em; padding-left: 1.2em; border-left: 2px solid #eee; }
+ul.tree .muted { color:#6b7280; font-size:12px; }
 ul.tree code { padding: 0 .25em; background:#f5f5f5; border-radius:4px; }
-details { margin: .25em 0; }
+
+/* 折叠分组（端口） */
+.group-card { border-top:1px solid #e5e7eb; }
+.group-header { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; cursor:pointer; }
+.group-header:hover { background:#fafafa; }
+.group-header .title { display:flex; align-items:center; gap:10px; font-weight:600; }
+.group-header .count { font-weight:500; font-size:12px; color:#6b7280; background:#f3f4f6; padding:2px 6px; border-radius:999px; }
+.chevron { width:28px; height:28px; border-radius:999px; border:1px solid #e5e7eb; background:#fff; position:relative; }
+.chevron::after {
+  content:''; position:absolute; top:50%; left:50%; width:8px; height:8px; border-right:2px solid #111827; border-bottom:2px solid #111827; transform: translate(-50%,-60%) rotate(45deg); transition: transform .18s ease;
+}
+.group-card[data-collapsed="true"] .chevron::after { transform: translate(-50%,-40%) rotate(-135deg); }
+.group-body { padding: 8px 14px 14px; border-top:1px solid #e5e7eb; }
+.group-card[data-collapsed="true"] .group-body { display:none; }
+
+.sub-group { margin: 6px 0 10px; }
+.sub-group .sub-head { font-weight:600; color:#374151; margin: 6px 0; }
+.port-list { list-style:none; margin:0; padding:0; }
+.port-row { display:flex; align-items:flex-start; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #eee; gap:12px; }
+.port-row:last-child { border-bottom:none; }
+.port-row .left { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.port-row .left code { padding: 0 .25em; background:#f5f5f5; border-radius:4px; }
+.port-row .meta { color:#9ca3af; font-size:12px; }
+.badge { font-size: 12px; padding: 2px 6px; border-radius: 999px; background: #eef2ff; }
+.badge-red { background:#fee2e2; }
+.chip { background:#f3f4f6; border-radius: 12px; padding: 2px 8px; font-size:12px; }
+
+.right { flex: 1; }
+.links { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+.link-item { display:flex; align-items:center; gap:6px; }
+
+.connect-box { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.searchTarget { min-width: 180px; padding:6px 8px; }
+.target-port { min-width: 140px; padding:6px 8px; }
+
+.btn { padding:6px 10px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; cursor:pointer; }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn-primary { background:#111827; color:#fff; border-color:#111827; }
+.btn-ghost { background:transparent; }
+.btn.danger { border-color:#ef4444; color:#ef4444; }
 </style>
 {% endblock %}
-
