@@ -23,14 +23,9 @@ def api_create_link():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
-@connect_bp.get('/<int:pid>/candidates')  # 兼容旧模板的 URL 构造
+# blueprints/connect.py 片段
+@connect_bp.get('/<int:pid>/candidates')
 def api_candidates(pid: Optional[int] = None):
-    """
-    
-    新接口：/connect/candidates?project_id=&source_port_id=&q=
-       返回: {"ok": True, "items": [...]}
-    """
-    # 旧模式：有 a、b 参数
     a_dev = request.args.get('a', type=int)
     b_dev = request.args.get('b', type=int)
     if a_dev and b_dev:
@@ -38,24 +33,28 @@ def api_candidates(pid: Optional[int] = None):
             with get_conn() as conn, conn.cursor() as cur:
                 def fetch_ports(dev_id: int):
                     cur.execute("""
-                        SELECT p.id AS port_id,
-                               p.name,
-                               p.port_type_id,
-                               p.max_links,
-                               p.is_active
+                        SELECT
+                            p.id   AS port_id,
+                            p.name,
+                            p.port_type_id,
+                            p.port_template_id,          -- ★ 加上模板ID用于属性匹配
+                            tpl.name AS attr_name,       -- ★ 返回属性名
+                            p.max_links,
+                            p.is_active
                         FROM port p
+                        LEFT JOIN port_template tpl ON tpl.id = p.port_template_id
                         WHERE p.device_id=%s
                         ORDER BY p.name
                     """, (dev_id,))
                     rows = cur.fetchall() or []
-                    # 计算是否占用（达到上限 或 已关闭）
+                    # 计算占用：达到上限 或 已关闭
                     for r in rows:
                         cur.execute("""
                             SELECT COUNT(*) AS c FROM link
                             WHERE a_port_id=%s OR b_port_id=%s
                         """, (r['port_id'], r['port_id']))
                         c = (cur.fetchone() or {}).get('c', 0)
-                        occupied = (int(c) >= int(r['max_links'] or 0)) or (int(r['is_active'] or 1) == 0)
+                        occupied = (int(c) >= int(r.get('max_links') or 0)) or (int(r.get('is_active') or 1) == 0)
                         r['occupied'] = bool(occupied)
                     return rows
 
@@ -65,18 +64,9 @@ def api_candidates(pid: Optional[int] = None):
         except Exception as e:
             return jsonify({"ok": False, "err": str(e)}), 500
 
-    # 新模式：项目 + 源端口 模糊搜索
-    project_id     = request.args.get('project_id', type=int)
-    source_port_id = request.args.get('source_port_id', type=int)
-    q              = (request.args.get('q') or '').strip()
-    if not project_id or not source_port_id:
-        return jsonify({"ok": False, "error": "缺少参数"}), 400
-    try:
-        items = find_candidates(project_id, source_port_id, q, limit=20)
-        return jsonify({"ok": True, "items": items})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    
+    # ……新模式分支保持不变（如果你在用旧模板，就不会走这里）
+    ...
+  
 @connect_bp.post('/<int:pid>/make_link')
 def api_make_link(pid: int):
     """

@@ -130,17 +130,17 @@ def edit_attrs(device_id):
 
 # --------- 端口相关 API ---------
 
-@bp_devices.route("/<int:device_id>/ports/<int:parent_port_id>/children", methods=["POST"])
-def create_child_port_api(device_id, parent_port_id):
-    name = (request.json.get("name") if request.is_json else request.form.get("name")) or ""
-    name = name.strip()
-    if not name:
-        return jsonify({"ok": False, "msg": "name required"}), 400
-    try:
-        cid = create_child_port(device_id, parent_port_id, name)
-        return jsonify({"ok": True, "data": {"id": cid}})
-    except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)})
+# @bp_devices.route("/<int:device_id>/ports/<int:parent_port_id>/children", methods=["POST"])
+# def create_child_port_api(device_id, parent_port_id):
+#     name = (request.json.get("name") if request.is_json else request.form.get("name")) or ""
+#     name = name.strip()
+#     if not name:
+#         return jsonify({"ok": False, "msg": "name required"}), 400
+#     try:
+#         cid = create_child_port(device_id, parent_port_id, name)
+#         return jsonify({"ok": True, "data": {"id": cid}})
+#     except Exception as e:
+#         return jsonify({"ok": False, "msg": str(e)})
 
 # --------- AJAX API：按父子关系返回直接子项 ---------
 @bp_devices.route("/options-children")
@@ -155,3 +155,16 @@ def api_options_children():
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e), "data": []})
+
+
+@bp_devices.post("/devices/<int:device_id>/ports/<int:parent_port_id>/children")
+def create_child_port_api(device_id: int, parent_port_id: int):
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "msg": "name required"}), 400
+    try:
+        new_id = create_child_port(device_id, parent_port_id, name)  # ✅ 不再限制层级
+        return jsonify({"ok": True, "id": int(new_id)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400

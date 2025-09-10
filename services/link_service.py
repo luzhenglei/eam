@@ -1,6 +1,5 @@
-# services/link_service.py
-from typing import Any, Dict, List, Set
-
+import re
+from typing import Any, Dict, List, Optional, Tuple,Set
 from db import get_conn  # 数据库连接工具
 
 
@@ -167,66 +166,37 @@ def find_candidates(project_id: int, device_a_id: int, device_b_id: int) -> Dict
 
 # ================== 建立/删除连接 ==================
 
-def create_link(project_id: int, a_port_id: int, b_port_id: int, status: str = "CONNECTED") -> int:
-    """建立连接，校验类型/属性一致且端口可用。"""
-    if a_port_id == b_port_id:
-        raise ValueError("不能将同一端口两端相连")
+def _has_children(conn, port_id: int) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM port WHERE parent_port_id=%s LIMIT 1", (port_id,))
+        return cur.fetchone() is not None
 
+def create_link(project_id: int, from_port_id: int, to_port_id: int) -> int:
+    if from_port_id == to_port_id:
+        raise ValueError("不能把端口与自身相连")
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT p.id AS port_id, p.name, p.port_type_id, p.is_active, pt.name AS rule_attr_name,
-                   d.id AS device_id, d.project_id
-            FROM port p
-            LEFT JOIN port_template pt ON pt.id = p.port_template_id
-            JOIN device d ON d.id = p.device_id
-            WHERE p.id=%s
-            """,
-            (a_port_id,),
-        )
-        a = cur.fetchone()
-        cur.execute(
-            """
-            SELECT p.id AS port_id, p.name, p.port_type_id, p.is_active, pt.name AS rule_attr_name,
-                   d.id AS device_id, d.project_id
-            FROM port p
-            LEFT JOIN port_template pt ON pt.id = p.port_template_id
-            JOIN device d ON d.id = p.device_id
-            WHERE p.id=%s
-            """,
-            (b_port_id,),
-        )
-        b = cur.fetchone()
+        fr = _get_port_row(conn, from_port_id, for_update=True)
+        to = _get_port_row(conn, to_port_id,   for_update=True)
+        _ensure_same_project(project_id, fr, to)
+        _ensure_not_same_device(fr, to)
 
-    if not a or not b:
-        raise ValueError("端口不存在")
-    if not a.get("is_active") or not b.get("is_active"):
-        raise ValueError("端口已关闭，不能连线")
-    if int(a["device_id"]) == int(b["device_id"]):
-        raise ValueError("不能连接同一台设备上的两个端口")
-    if int(a["project_id"]) != project_id or int(b["project_id"]) != project_id:
-        raise ValueError("项目不匹配")
-    if int(a["port_type_id"] or 0) != int(b["port_type_id"] or 0):
-        raise ValueError("端口类型不匹配")
-    if (a.get("rule_attr_name") or "") != (b.get("rule_attr_name") or ""):
-        raise ValueError("端口属性不匹配")
-    if _is_port_occupied(project_id, a_port_id) or _is_port_occupied(project_id, b_port_id):
-        raise ValueError("端口连接数已达上限")
+        # ★ 新增：父端口不可连线（有子端口的端口视为“父端口”）
+        if _has_children(conn, from_port_id) or _has_children(conn, to_port_id):
+            raise ValueError("存在子端口的端口不可直接连线，请改连子端口")
 
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO link (project_id, a_port_id, b_port_id, a_device_id, b_device_id, status, created_at)
-            VALUES (%s,%s,%s,
-                    (SELECT device_id FROM port WHERE id=%s),
-                    (SELECT device_id FROM port WHERE id=%s),
-                    %s, NOW())
-            """,
-            (project_id, a_port_id, b_port_id, a_port_id, b_port_id, status),
-        )
-        conn.commit()
-        return int(cur.lastrowid)
+        if _already_linked(conn, from_port_id, to_port_id):
+            raise ValueError("这两个端口已建立连线")
 
+        ok, msg = check_port_available(conn, from_port_id)
+        if not ok: raise ValueError(msg)
+        ok, msg = check_port_available(conn, to_port_id)
+        if not ok: raise ValueError(msg)
+
+        cur.execute("""
+            INSERT INTO link (project_id, a_device_id, a_port_id, b_device_id, b_port_id, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, 'CONNECTED', NOW())
+        """, (project_id, fr['device_id'], from_port_id, to['device_id'], to_port_id))
+        return cur.lastrowid
 
 def delete_link(project_id: int, link_id: int) -> bool:
     with get_conn() as conn, conn.cursor() as cur:
@@ -260,47 +230,67 @@ def list_links_in_project(project_id: int) -> List[Dict[str, Any]]:
         return cur.fetchall() or []
 
 
+
 def list_cables_paginated(project_id: int, page: int = 1, page_size: int = 50) -> Dict[str, Any]:
-    """分页返回线缆清册。"""
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 50), 200))
     offset = (page - 1) * page_size
 
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM link WHERE project_id=%s AND status='CONNECTED'",
-            (project_id,),
-        )
+        # 统计
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM link l
+            WHERE l.project_id=%s AND l.status='CONNECTED'
+        """, (project_id,))
         total = (cur.fetchone() or {}).get("c", 0)
 
-        cur.execute(
-            """
-            SELECT l.id AS link_id, l.status, l.printed, l.printed_at,
-                   da.id AS a_device_id, da.name AS a_device_name,
-                   pa.id AS a_port_id, pa.name AS a_port_name,
-                   ta.id AS a_port_type_id, ta.name AS a_port_type_name,
-                   db.id AS b_device_id, db.name AS b_device_name,
-                   pb.id AS b_port_id, pb.name AS b_port_name,
-                   tb.id AS b_port_type_id, tb.name AS b_port_type_name
+        # 列表：带端口类型名
+        cur.execute(f"""
+            SELECT
+                l.id AS link_id,
+                l.status,
+                l.printed,
+                l.printed_at,
+
+                da.id   AS a_device_id,
+                da.name AS a_device_name,
+                pa.id   AS a_port_id,
+                pa.name AS a_port_name,
+                ta.name AS a_port_type_name,
+
+                db.id   AS b_device_id,
+                db.name AS b_device_name,
+                pb.id   AS b_port_id,
+                pb.name AS b_port_name,
+                tb.name AS b_port_type_name
+
             FROM link l
-            JOIN port pa ON pa.id = l.a_port_id
+            JOIN port   pa ON pa.id = l.a_port_id
             JOIN device da ON da.id = l.a_device_id
             LEFT JOIN port_type ta ON ta.id = pa.port_type_id
-            JOIN port pb ON pb.id = l.b_port_id
+
+            JOIN port   pb ON pb.id = l.b_port_id
             JOIN device db ON db.id = l.b_device_id
             LEFT JOIN port_type tb ON tb.id = pb.port_type_id
+
             WHERE l.project_id=%s AND l.status='CONNECTED'
-            ORDER BY da.name ASC, ta.name ASC, pa.name ASC
+            ORDER BY da.name ASC, ta.name ASC, pa.name ASC, l.id ASC
             LIMIT %s OFFSET %s
-            """,
-            (project_id, page_size, offset),
-        )
+        """, (project_id, page_size, offset))
         rows = cur.fetchall() or []
 
-    items: List[Dict[str, Any]] = []
+    # 兼容旧前端：补充方向占位
     for r in rows:
-        items.append({**r, "a_dir": "", "b_dir": ""})
-    return {"total": int(total or 0), "page": page, "page_size": page_size, "items": items}
+        r["a_dir"] = r.get("a_dir") or ""
+        r["b_dir"] = r.get("b_dir") or ""
+
+    return {
+        "total": int(total or 0),
+        "page": page,
+        "page_size": page_size,
+        "items": rows,
+    }
 
 
 def fetch_cables_by_ids(project_id: int, link_ids: List[int]) -> List[Dict[str, Any]]:
@@ -308,23 +298,36 @@ def fetch_cables_by_ids(project_id: int, link_ids: List[int]) -> List[Dict[str, 
         return []
     placeholders = ",".join(["%s"] * len(link_ids))
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            f"""
-            SELECT l.id AS link_id, l.status, l.printed, l.printed_at,
-                   da.name AS a_device_name, pa.name AS a_port_name, ta.name AS a_port_type_name,
-                   db.name AS b_device_name, pb.name AS b_port_name, tb.name AS b_port_type_name
+        cur.execute(f"""
+            SELECT
+                l.id AS link_id,
+                l.status,
+                l.printed,
+                l.printed_at,
+
+                da.name AS a_device_name,
+                pa.name AS a_port_name,
+                ta.name AS a_port_type_name,
+
+                db.name AS b_device_name,
+                pb.name AS b_port_name,
+                tb.name AS b_port_type_name
+
             FROM link l
-            JOIN port pa ON pa.id = l.a_port_id
+            JOIN port   pa ON pa.id = l.a_port_id
             JOIN device da ON da.id = l.a_device_id
             LEFT JOIN port_type ta ON ta.id = pa.port_type_id
-            JOIN port pb ON pb.id = l.b_port_id
+
+            JOIN port   pb ON pb.id = l.b_port_id
             JOIN device db ON db.id = l.b_device_id
             LEFT JOIN port_type tb ON tb.id = pb.port_type_id
-            WHERE l.project_id=%s AND l.status='CONNECTED' AND l.id IN ({placeholders})
-            """,
-            [project_id] + link_ids,
-        )
+
+            WHERE l.project_id=%s AND l.status='CONNECTED'
+              AND l.id IN ({placeholders})
+            ORDER BY l.id ASC
+        """, [project_id] + link_ids)
         rows = cur.fetchall() or []
+
     for r in rows:
         r["a_dir"] = ""
         r["b_dir"] = ""
@@ -333,24 +336,35 @@ def fetch_cables_by_ids(project_id: int, link_ids: List[int]) -> List[Dict[str, 
 
 def fetch_all_cables(project_id: int) -> List[Dict[str, Any]]:
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT l.id AS link_id, l.status, l.printed, l.printed_at,
-                   da.name AS a_device_name, pa.name AS a_port_name, ta.name AS a_port_type_name,
-                   db.name AS b_device_name, pb.name AS b_port_name, tb.name AS b_port_type_name
+        cur.execute("""
+            SELECT
+                l.id AS link_id,
+                l.status,
+                l.printed,
+                l.printed_at,
+
+                da.name AS a_device_name,
+                pa.name AS a_port_name,
+                ta.name AS a_port_type_name,
+
+                db.name AS b_device_name,
+                pb.name AS b_port_name,
+                tb.name AS b_port_type_name
+
             FROM link l
-            JOIN port pa ON pa.id = l.a_port_id
+            JOIN port   pa ON pa.id = l.a_port_id
             JOIN device da ON da.id = l.a_device_id
             LEFT JOIN port_type ta ON ta.id = pa.port_type_id
-            JOIN port pb ON pb.id = l.b_port_id
+
+            JOIN port   pb ON pb.id = l.b_port_id
             JOIN device db ON db.id = l.b_device_id
             LEFT JOIN port_type tb ON tb.id = pb.port_type_id
+
             WHERE l.project_id=%s AND l.status='CONNECTED'
-            ORDER BY da.name ASC, ta.name ASC, pa.name ASC
-            """,
-            (project_id,),
-        )
+            ORDER BY da.name ASC, ta.name ASC, pa.name ASC, l.id ASC
+        """, (project_id,))
         rows = cur.fetchall() or []
+
     for r in rows:
         r["a_dir"] = ""
         r["b_dir"] = ""
@@ -619,6 +633,133 @@ def list_cables_paginated(project_id: int,
 
     return {"total": total, "items": items, "page": page, "page_size": page_size}
 
+def _natural_key(s: str) -> Tuple:
+    """端口名自然排序：GE1/0/10 比 GE1/0/2 大"""
+    if s is None:
+        return ()
+    parts = re.split(r'(\d+)', str(s))
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append(int(p))
+        else:
+            key.append(p.lower())
+    return tuple(key)
+
+def list_connected_port_types(project_id: int) -> List[Dict[str, Any]]:
+    """返回当前项目“已建立连接的端口类型”去重列表，用于筛选下拉。"""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT t.id, t.name
+            FROM link l
+            JOIN port pa ON pa.id = l.a_port_id
+            LEFT JOIN port_type t ON t.id = pa.port_type_id
+            WHERE l.project_id=%s AND l.status='CONNECTED' AND pa.port_type_id IS NOT NULL
+            UNION
+            SELECT DISTINCT t.id, t.name
+            FROM link l
+            JOIN port pb ON pb.id = l.b_port_id
+            LEFT JOIN port_type t ON t.id = pb.port_type_id
+            WHERE l.project_id=%s AND l.status='CONNECTED' AND pb.port_type_id IS NOT NULL
+            ORDER BY name ASC
+        """, (project_id, project_id))
+        return cur.fetchall() or []
+
+def list_cables_paginated(project_id: int,
+                          page: int = 1,
+                          page_size: int = 50,
+                          type_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    分页返回线缆清册：
+    - 支持按端口类型ID筛选（任一端的端口类型命中即可）
+    - 字段包含 a_port_type_name / b_port_type_name，为空时返回空字符串
+    - 排序：A设备名 → A端口类型名 → A端口名（自然排序）
+    """
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 50), 200))
+    offset = (page - 1) * page_size
+
+    with get_conn() as conn, conn.cursor() as cur:
+        # 统计
+        if type_id:
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM link l
+                LEFT JOIN port pa ON pa.id = l.a_port_id
+                LEFT JOIN port pb ON pb.id = l.b_port_id
+                WHERE l.project_id=%s AND l.status='CONNECTED'
+                  AND (pa.port_type_id=%s OR pb.port_type_id=%s)
+            """, (project_id, type_id, type_id))
+        else:
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM link l
+                WHERE l.project_id=%s AND l.status='CONNECTED'
+            """, (project_id,))
+        total = int((cur.fetchone() or {}).get("c", 0))
+
+        # 明细
+        if type_id:
+            cur.execute("""
+                SELECT
+                    l.id AS link_id, l.status, l.printed, l.printed_at,
+                    da.id   AS a_device_id, da.name AS a_device_name,
+                    pa.id   AS a_port_id,   pa.name AS a_port_name,
+                    ta.name AS a_port_type_name,
+                    db.id   AS b_device_id, db.name AS b_device_name,
+                    pb.id   AS b_port_id,   pb.name AS b_port_name,
+                    tb.name AS b_port_type_name
+                FROM link l
+                JOIN device da ON da.id = l.a_device_id
+                JOIN port   pa ON pa.id = l.a_port_id
+                LEFT JOIN port_type ta ON ta.id = pa.port_type_id
+                JOIN device db ON db.id = l.b_device_id
+                JOIN port   pb ON pb.id = l.b_port_id
+                LEFT JOIN port_type tb ON tb.id = pb.port_type_id
+                WHERE l.project_id=%s AND l.status='CONNECTED'
+                  AND (pa.port_type_id=%s OR pb.port_type_id=%s)
+                -- 先粗排，最终用 Python 再自然排序
+                ORDER BY da.name ASC, ta.name ASC, pa.name ASC, l.id ASC
+                LIMIT %s OFFSET %s
+            """, (project_id, type_id, type_id, page_size, offset))
+        else:
+            cur.execute("""
+                SELECT
+                    l.id AS link_id, l.status, l.printed, l.printed_at,
+                    da.id   AS a_device_id, da.name AS a_device_name,
+                    pa.id   AS a_port_id,   pa.name AS a_port_name,
+                    ta.name AS a_port_type_name,
+                    db.id   AS b_device_id, db.name AS b_device_name,
+                    pb.id   AS b_port_id,   pb.name AS b_port_name,
+                    tb.name AS b_port_type_name
+                FROM link l
+                JOIN device da ON da.id = l.a_device_id
+                JOIN port   pa ON pa.id = l.a_port_id
+                LEFT JOIN port_type ta ON ta.id = pa.port_type_id
+                JOIN device db ON db.id = l.b_device_id
+                JOIN port   pb ON pb.id = l.b_port_id
+                LEFT JOIN port_type tb ON tb.id = pb.port_type_id
+                WHERE l.project_id=%s AND l.status='CONNECTED'
+                ORDER BY da.name ASC, ta.name ASC, pa.name ASC, l.id ASC
+                LIMIT %s OFFSET %s
+            """, (project_id, page_size, offset))
+        rows = cur.fetchall() or []
+
+    # 兜底空字符串 & 自然排序
+    for r in rows:
+        r["a_port_type_name"] = r.get("a_port_type_name") or ""
+        r["b_port_type_name"] = r.get("b_port_type_name") or ""
+        r["a_dir"] = r.get("a_dir") or ""
+        r["b_dir"] = r.get("b_dir") or ""
+    rows.sort(key=lambda r: (
+        (r.get("a_device_name") or "").lower(),
+        (r.get("a_port_type_name") or "").lower(),
+        _natural_key(r.get("a_port_name") or "")
+    ))
+
+    return {"total": total, "page": page, "page_size": page_size, "items": rows}
+
+
 # ----------------- 设备端口（供 connect_config 页面调用） -----------------
 def _links_of_port(conn, port_id: int) -> List[dict]:
     with conn.cursor() as cur:
@@ -649,29 +790,62 @@ def _links_of_port(conn, port_id: int) -> List[dict]:
                 })
         return result
 
-def get_device_ports_for_connect_ui(project_id: int, device_id: int) -> List[Dict[str, Any]]:
-    """
-    返回某设备下的端口（供 connect_config.html 渲染）：
-    每个端口包含：port_id/name/is_active/max_links/conn_count/links
-    如无 port_type/port_attr 表，请删除对应 LEFT JOIN 行。
-    """
+def get_device_ports_for_connect_ui(project_id: int, device_id: int) -> List[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT p.id AS port_id, p.name, p.is_active, p.max_links,
-       pt.name   AS port_type_name,
-       tmpl.name AS attr_name               
-                FROM port p
-                JOIN device d        ON d.id = p.device_id
-                LEFT JOIN port_type pt        ON pt.id   = p.port_type_id
-                LEFT JOIN port_template tmpl  ON tmpl.id = p.port_template_id   -- ★ 关联模板表
-                WHERE d.project_id=%s AND p.device_id=%s
-                ORDER BY p.name
-
+            SELECT
+              p.id   AS port_id,
+              p.name AS name,
+              p.is_active,
+              p.max_links,
+              p.parent_port_id,
+              pt.name AS port_type_name,
+              tpl.name AS attr_name
+            FROM port p
+            JOIN device d        ON d.id = p.device_id
+            LEFT JOIN port_type pt   ON pt.id = p.port_type_id
+            LEFT JOIN port_template tpl ON tpl.id = p.port_template_id
+            WHERE d.project_id=%s AND p.device_id=%s
+            ORDER BY p.name
         """, (project_id, device_id))
-        ports = cur.fetchall()
+        rows = cur.fetchall() or []
 
-        for p in ports:
-            p['conn_count'] = _link_count_of_port(conn, p['port_id'])
-            p['links'] = _links_of_port(conn, p['port_id'])
-        return ports    
+        # 连接计数与 has_children
+        id_set = [r["port_id"] for r in rows]
+        child_set = set()
+        if id_set:
+            cur.execute(f"SELECT parent_port_id pid, COUNT(*) c FROM port WHERE parent_port_id IN ({','.join(['%s']*len(id_set))}) GROUP BY parent_port_id", id_set)
+            for rr in cur.fetchall() or []:
+                if rr["pid"]:
+                    child_set.add(int(rr["pid"]))
 
+        for r in rows:
+            # 计算连接数
+            cur.execute("SELECT COUNT(*) c FROM link WHERE a_port_id=%s OR b_port_id=%s", (r["port_id"], r["port_id"]))
+            r["conn_count"]  = int((cur.fetchone() or {}).get("c", 0))
+            r["has_children"] = r["port_id"] in child_set
+
+        # links 数组（可选：按需保留）
+        for r in rows:
+            cur.execute("""
+                SELECT l.id,
+                       CASE WHEN l.a_port_id=%s THEN l.b_port_id ELSE l.a_port_id END AS other_port_id
+                FROM link l
+                WHERE l.a_port_id=%s OR l.b_port_id=%s
+            """, (r["port_id"], r["port_id"], r["port_id"]))
+            link_rows = cur.fetchall() or []
+            r["links"] = []
+            for lr in link_rows:
+                cur.execute("""
+                    SELECT p.name AS other_port_name, d.name AS other_device_name
+                    FROM port p JOIN device d ON d.id = p.device_id
+                    WHERE p.id=%s
+                """, (lr["other_port_id"],))
+                dst = cur.fetchone()
+                if dst:
+                    r["links"].append({
+                        "id": lr["id"],
+                        "other_port_name": dst["other_port_name"],
+                        "other_device_name": dst["other_device_name"],
+                    })
+        return rows

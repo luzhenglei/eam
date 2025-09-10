@@ -1,7 +1,7 @@
 # services/device_service.py
 import re
 from db import get_conn
-from typing import Dict, List
+from typing import List, Dict, Optional, Tuple, Any
 from services.option_service import list_options
 
 # -------- 设备基础 --------
@@ -229,22 +229,20 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
     {
       "flat_attrs": [...],                 # 设备(scope='device') 普通属性
       "cascaded_groups": [...],            # 设备 单属性树级联（凡是“枚举且存在层级”的属性）
-      "ports": [                           # 端口侧（每个端口一组）
+      "ports": [                           # 端口侧（每个端口一组，支持多级，含 depth）
         {
-          "port": {"id":..., "name":...},
+          "port": {"id":..., "name":..., "parent_port_id":..., "max_links":..., "is_active":...},
           "flat_attrs": [...],             # 端口普通属性
           "cascaded_groups": [             # 端口 单属性树级联
             {
               "base": "<attr_code>",
               "tree_attr_id": <attribute_id>,
               "selected_chain": [optionId1, optionId2, ...],
-              "texts": {
-                "root": "<根文本>",
-                "levels": ["第1级文本","第2级文本", ...]   # 与 selected_chain 顺序一致
-              }
+              "texts": { "root": "<根文本>", "levels": ["第1级文本","第2级文本", ...] }
             },
             ...
-          ]
+          ],
+          "depth": 0|1|2...                # ★ 新增：层级，用于模板缩进 & 展示“新增子端口”按钮
         },
         ...
       ]
@@ -308,13 +306,17 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
         else:
             flat_attrs.append(a)
 
-    # ===== 端口侧：端口清单 + 端口属性定义 + 当前值 =====
-    ports_model = []
-    ports = _list_device_ports(device_id)                 # [{"id":..,"name":..}, ...]
+    # ===== 端口侧：端口清单（多级树） + 端口属性定义 + 当前值 =====
+    # ★ 改动点：用全量树（带 depth）
+    ports_model: List[Dict[str, Any]] = []
+    ports_flat = fetch_ports_hierarchy(device_id)          # [{"port":<row>, "depth":<int>}, ...]
     port_attrs_all = _list_template_port_attrs(template_id)  # 端口作用域的属性定义
 
-    for p in ports:
-        pid = p["id"]
+    for item in ports_flat:
+        p_row = item["port"]
+        depth = item["depth"]
+        pid   = p_row["id"]
+
         curvals = _get_current_port_values(pid)
 
         pa_flat, pa_cascade = [], []
@@ -370,13 +372,14 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
         ports_model.append({
             "port": {
                 "id": pid,
-                "name": p.get("name") or f"Port-{pid}",
-                "parent_port_id": p.get("parent_port_id"),
-                "max_links": p.get("max_links") or 1,
-                "is_active": p.get("is_active", 1),
+                "name": p_row.get("name") or f"Port-{pid}",
+                "parent_port_id": p_row.get("parent_port_id"),
+                "max_links": p_row.get("max_links") or 1,
+                "is_active": p_row.get("is_active", 1),
             },
             "flat_attrs": pa_flat,
-            "cascaded_groups": pa_cascade
+            "cascaded_groups": pa_cascade,
+            "depth": depth,   # ★ 关键：模板用于缩进和按钮展示
         })
 
     # 汇总返回
@@ -385,6 +388,43 @@ def get_template_attrs_for_form(template_id: int, device_id: int):
         "cascaded_groups": cascaded_groups,
         "ports": ports_model
     }
+
+def fetch_ports_hierarchy(device_id: int) -> List[Dict[str, Any]]:
+    """
+    返回设备下所有端口的“扁平化树”列表：
+    每项包含：
+      - port  : 完整端口行（含 id/name/parent_port_id/is_active/max_links/...）
+      - depth : 层级深度（顶层=0，子=1，孙=2…）
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT *
+            FROM port
+            WHERE device_id=%s
+            ORDER BY parent_port_id IS NOT NULL, name
+        """, (device_id,))
+        rows = cur.fetchall() or []
+
+    by_parent: Dict[int, List[Dict[str, Any]]] = {}
+    roots: List[Dict[str, Any]] = []
+    for r in rows:
+        pid = r.get("parent_port_id")
+        if pid:
+            by_parent.setdefault(int(pid), []).append(r)
+        else:
+            roots.append(r)
+
+    out: List[Dict[str, Any]] = []
+
+    def dfs(node: Dict[str, Any], depth: int):
+        out.append({"port": node, "depth": depth})
+        for ch in by_parent.get(int(node["id"]), []) or []:
+            dfs(ch, depth + 1)
+
+    for root in roots:
+        dfs(root, 0)
+
+    return out
 
 
 def _get_current_port_values(port_id: int):
@@ -452,52 +492,48 @@ def _list_device_ports(device_id: int):
         return rows
 
 
+# services/device_service.py
+
+def _port_link_count(conn, port_id: int) -> int:
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT (SELECT COUNT(*) FROM link WHERE a_port_id=%s OR b_port_id=%s) AS c
+        """, (port_id, port_id))
+        r = cur.fetchone()
+        return int(r['c'] or 0)
+
 def create_child_port(device_id: int, parent_port_id: int, name: str) -> int:
-    """在设备下为某端口新增子端口（仅允许一层）。"""
+    """
+    创建子端口：继承父端口的 port_type_id、port_template_id、max_links、is_active
+    """
     if not name or not str(name).strip():
-        raise ValueError("name required")
-    name = str(name).strip()
+        raise ValueError("子端口名称不能为空")
+
     with get_conn() as conn, conn.cursor() as cur:
-        # 检查父端口合法性
-        cur.execute(
-            "SELECT id, port_type_id, parent_port_id FROM port WHERE id=%s AND device_id=%s",
-            (parent_port_id, device_id),
-        )
+        # 取父端口
+        cur.execute("""
+            SELECT id, device_id, port_type_id, port_template_id, max_links, is_active
+            FROM port WHERE id=%s
+        """, (parent_port_id,))
         parent = cur.fetchone()
         if not parent:
-            raise ValueError("parent port not found")
-        if parent.get("parent_port_id"):
-            raise ValueError("only one level of nesting allowed")
+            raise ValueError("父端口不存在")
+        if int(parent["device_id"]) != int(device_id):
+            raise ValueError("父端口不属于该设备")
 
-        # 名称冲突检查（同设备内）
-        cur.execute(
-            "SELECT 1 FROM port WHERE device_id=%s AND name=%s",
-            (device_id, name),
-        )
-        if cur.fetchone():
-            raise ValueError("port name already exists")
+        # 继承关键字段
+        port_type_id      = parent.get("port_type_id")
+        port_template_id  = parent.get("port_template_id")
+        max_links         = parent.get("max_links") or 1
+        is_active         = parent.get("is_active", 1)
 
         # 插入子端口
-        cur.execute(
-            "INSERT INTO port (device_id, name, parent_port_id, port_type_id) VALUES (%s,%s,%s,%s)",
-            (device_id, name, parent_port_id, parent.get("port_type_id")),
-        )
-        new_id = cur.lastrowid
-
-        # 继承属性
-        cur.execute(
-            "SELECT attribute_id, option_id, value_text FROM port_attr_value WHERE port_id=%s",
-            (parent_port_id,),
-        )
-        rows = cur.fetchall() or []
-        for r in rows:
-            cur.execute(
-                "INSERT INTO port_attr_value (port_id, attribute_id, option_id, value_text) VALUES (%s,%s,%s,%s)",
-                (new_id, r["attribute_id"], r["option_id"], r["value_text"]),
-            )
-
+        cur.execute("""
+            INSERT INTO port (device_id, parent_port_id, name, port_type_id, port_template_id, max_links, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (device_id, parent_port_id, name.strip(), port_type_id, port_template_id, max_links, is_active))
         conn.commit()
-        return new_id
+        return int(cur.lastrowid)
 
 
 def _list_template_port_attrs(template_id: int):
@@ -1049,3 +1085,35 @@ def search_devices_in_project(project_id: int, keyword: str):
         """, (project_id, kw, kw))
         return cur.fetchall()
 
+# 递归取某端口的全部子孙端口ID（含直接与间接）
+def _descendant_port_ids(root_port_id: int) -> List[int]:
+    ids = []
+    with get_conn() as conn, conn.cursor() as cur:
+        # 简单 BFS
+        queue = [root_port_id]
+        while queue:
+            cur_parent = queue.pop(0)
+            cur.execute("SELECT id FROM port WHERE parent_port_id=%s", (cur_parent,))
+            children = [r['id'] for r in (cur.fetchall() or [])]
+            ids.extend(children)
+            queue.extend(children)
+    return ids
+
+def set_port_active(port_id: int, is_active: int, cascade: bool = True) -> int: 
+    """设置端口启用状态；当关闭时默认级联关闭全部子孙端口；开启仅改自身（避免误开子层）。"""
+    is_active = 1 if int(is_active) == 1 else 0
+    with get_conn() as conn, conn.cursor() as cur:
+        affected = 0
+        if is_active == 0 and cascade:
+            # 关闭：自身 + 全部子孙
+            all_ids = [port_id] + _descendant_port_ids(port_id)
+            cur.execute(
+                f"UPDATE port SET is_active=0 WHERE id IN ({','.join(['%s']*len(all_ids))})",
+                tuple(all_ids)
+            )
+            affected = cur.rowcount or 0
+        else:
+            # 开启：只改自身
+            cur.execute("UPDATE port SET is_active=%s WHERE id=%s", (is_active, port_id))
+            affected = cur.rowcount or 0
+        return int(affected)

@@ -3,48 +3,74 @@
 {% block content %}
 <h2>线缆清册 · 项目：{{ project.name }}</h2>
 
+<!-- 筛选栏：端口类型（出现过的） -->
+<form method="get" style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+  <label>端口类型：</label>
+  <select name="type" style="min-width:180px">
+    <option value="">（全部）</option>
+    {% for t in type_options %}
+      <option value="{{ t }}" {{ 'selected' if selected_type==t else '' }}>{{ t }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">筛选</button>
+</form>
+
 <div style="margin:8px 0;">
   <button class="btn" onclick="exportAll()">导出全部</button>
   <button class="btn" onclick="exportSelected()">导出选中</button>
   <button class="btn" onclick="printSelected()">打印选中（预览）</button>
   <button class="btn" onclick="markPrinted()">标记为已打印</button>
+  <button class="btn" id="btnResetCols">恢复列</button>
 </div>
 
-<table class="table">
+<table class="table" id="cableTable">
   <thead>
-    <tr>
-      <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
-      <th colspan="6">FROM 侧</th>
-      <th colspan="6">TO 侧</th>
-      <th style="width:80px;">状态</th>
-      <th style="width:70px;">LinkID</th>
-    </tr>
+  <tr>
+    <th style="width:36px;"></th>
+    <th data-group="from" id="hdr-group-from" colspan="6">FROM 侧</th>
+    <th data-group="to"   id="hdr-group-to"   colspan="6">TO 侧</th>
+    <th style="width:80px;">状态</th>
+    <th style="width:70px;">LinkID</th>
+  </tr>
     <tr>
       <th></th>
-      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>FROM/TO</th>
-      <th>项目号</th><th>设备号</th><th>端口类型</th><th>端口号</th><th>线缆标签</th><th>TO/FROM</th>
-      <th>已打印</th><th>ID</th>
+      <th data-colkey="from.project">项目号 <button class="x" onclick="hideColumn('from.project')">×</button></th>
+      <th data-colkey="from.device">设备号 <button class="x" onclick="hideColumn('from.device')">×</button></th>
+      <th data-colkey="from.type">端口类型 <button class="x" onclick="hideColumn('from.type')">×</button></th>
+      <th data-colkey="from.port">端口号 <button class="x" onclick="hideColumn('from.port')">×</button></th>
+      <th data-colkey="from.label">线端编号 <button class="x" onclick="hideColumn('from.label')">×</button></th>
+      <th data-colkey="from.tag">线缆标签 <button class="x" onclick="hideColumn('from.tag')">×</button></th>
+
+      <th data-colkey="to.project">项目号 <button class="x" onclick="hideColumn('to.project')">×</button></th>
+      <th data-colkey="to.device">设备号 <button class="x" onclick="hideColumn('to.device')">×</button></th>
+      <th data-colkey="to.type">端口类型 <button class="x" onclick="hideColumn('to.type')">×</button></th>
+      <th data-colkey="to.port">端口号 <button class="x" onclick="hideColumn('to.port')">×</button></th>
+      <th data-colkey="to.label">线端编号 <button class="x" onclick="hideColumn('to.label')">×</button></th>
+      <th data-colkey="to.tag">线缆标签 <button class="x" onclick="hideColumn('to.tag')">×</button></th>
+
+      <th>已打印</th>
+      <th>ID</th>
     </tr>
+
   </thead>
   <tbody id="tbody">
     {% for r in items %}
-      {# 方向组合列已在服务层计算为 from_to / to_from；左右侧显示 “A/B” 原始端 #}
       <tr class="{{ 'printed-row' if r.printed else '' }}">
         <td><input type="checkbox" name="row" value="{{ r.link_id }}"></td>
 
-        <td>{{ project.name }}</td>
-        <td>{{ r.a_device_name }}</td>
-        <td>{{ r.a_port_type_name or '' }}</td>
-        <td>{{ r.a_port_name }}</td>
-        <td>{{ r.a_label }}</td>
-        <td>{{ r.from_to }}</td>
+        <td data-colkey="from.project">{{ project.name }}</td>
+        <td data-colkey="from.device">{{ r.a_device_name }}</td>
+        <td data-colkey="from.type">{{ r.a_port_type_name or '' }}</td>
+        <td data-colkey="from.port">{{ r.a_port_name }}</td>
+        <td data-colkey="from.label">{{ r.a_label }}</td>
+        <td data-colkey="from.tag">{{ r.from_to }}</td>
 
-        <td>{{ project.name }}</td>
-        <td>{{ r.b_device_name }}</td>
-        <td>{{ r.b_port_type_name or '' }}</td>
-        <td>{{ r.b_port_name }}</td>
-        <td>{{ r.b_label }}</td>
-        <td>{{ r.to_from }}</td>
+        <td data-colkey="to.project">{{ project.name }}</td>
+        <td data-colkey="to.device">{{ r.b_device_name }}</td>
+        <td data-colkey="to.type">{{ r.b_port_type_name or '' }}</td>
+        <td data-colkey="to.port">{{ r.b_port_name }}</td>
+        <td data-colkey="to.label">{{ r.b_label }}</td>
+        <td data-colkey="to.tag">{{ r.to_from }}</td>
 
         <td>{{ 'YES' if r.printed else 'NO' }}</td>
         <td>{{ r.link_id }}</td>
@@ -53,33 +79,70 @@
     {% if not items %}
       <tr><td colspan="16" class="muted">暂无连接</td></tr>
     {% endif %}
-  </tbody>
+    </tbody>
+
 </table>
 
-<!-- 分页 -->
 {% set pages = ( (total + page_size - 1) // page_size ) %}
 <div style="margin-top:8px;">
   <span class="muted">共 {{ total }} 条，页 {{ page }}/{{ pages }}</span>
   {% if page > 1 %}
-    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=1, page_size=page_size) }}">首页</a>
-    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page-1, page_size=page_size) }}">上一页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=1, page_size=page_size, type=selected_type) }}">首页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page-1, page_size=page_size, type=selected_type) }}">上一页</a>
   {% endif %}
   {% if page < pages %}
-    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page+1, page_size=page_size) }}">下一页</a>
-    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=pages, page_size=page_size) }}">末页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=page+1, page_size=page_size, type=selected_type) }}">下一页</a>
+    <a class="btn" href="{{ url_for('cables_bp.cables_page', pid=project.id, page=pages, page_size=page_size, type=selected_type) }}">末页</a>
   {% endif %}
 </div>
 
 <script>
-const PID =Number(' {{ project.id }}');
-const URL_EXPORT  = "{{ url_for('cables_bp.cables_export',  pid=project.id) }}";
-  const URL_PRINTED = "{{ url_for('cables_bp.cables_mark_printed', pid=project.id) }}";
-  const URL_PRINT_VIEW = (ids) =>
-    "{{ url_for('cables_bp.cables_page', pid=project.id) }}".replace('/cables','/cables/print')
-    + '?ids=' + encodeURIComponent(ids.join(','));
+const PID = Number('{{ project.id }}');
+const URL_EXPORT   = "{{ url_for('cables_bp.cables_export',  pid=project.id) }}";
+const URL_PRINTED  = "{{ url_for('cables_bp.cables_mark_printed', pid=project.id) }}";
+const URL_PRINT_VIEW = (ids) =>
+  "{{ url_for('cables_bp.cables_page', pid=project.id) }}".replace('/cables','/cables/print')
+  + '?ids=' + encodeURIComponent(ids.join(','));
+
 document.getElementById('chkAll').addEventListener('change', (e)=>{
   document.querySelectorAll('input[name="row"]').forEach(chk=>{ chk.checked = e.target.checked; });
 });
+
+const GROUP_KEYS = {
+  from: ['from.project','from.device','from.type','from.port','from.label','from.tag'],
+  to:   ['to.project','to.device','to.type','to.port','to.label','to.tag'],
+};
+
+function hideColumn(key) {
+  // 隐藏所有带这个 colkey 的 th/td
+  document.querySelectorAll(`[data-colkey="${key}"]`)
+    .forEach(el => el.classList.add('col-hidden'));
+  recalcGroupColspans();
+}
+
+function recalcGroupColspans() {
+  // 统计 FROM/TO 各自“仍可见”的列数，并更新分组表头的 colspan
+  Object.entries(GROUP_KEYS).forEach(([group, keys]) => {
+    let visibleCount = 0;
+    keys.forEach(k => {
+      // 查任意一个未隐藏元素来判断该列是否可见（th 或第一行 td 都可以）
+      const el = document.querySelector(`[data-colkey="${k}"]:not(.col-hidden)`);
+      if (el) visibleCount += 1;
+    });
+    const th = document.querySelector(`th[data-group="${group}"]`);
+    if (th) th.colSpan = Math.max(visibleCount, 0); // 可为 0，表示这组空了（浏览器允许）
+  });
+}
+
+// 如果你也支持“恢复所有列”的按钮，可用这个
+function showAllColumns() {
+  document.querySelectorAll('[data-colkey].col-hidden')
+    .forEach(el => el.classList.remove('col-hidden'));
+  recalcGroupColspans();
+}
+
+// 页面初始计算一次（如果你没有默认隐藏的列，这里只是校准而已）
+document.addEventListener('DOMContentLoaded', recalcGroupColspans);
 
 function _selectedIds(){
   const ids = [];
@@ -122,13 +185,49 @@ async function markPrinted(){
       body: new URLSearchParams(ids.map(id=>['ids', String(id)]))
     }).then(r=>r.json());
     if(!r.ok){ alert('标记失败'); return; }
-    // 标记成功：刷新当前页
     location.reload();
   }catch(e){ alert('请求失败：'+e); }
 }
+
+/* ========== 列隐藏（刷新恢复） ========== */
+(function(){
+  const table = document.getElementById('cableTable');
+  const head2 = table.tHead.rows[1]; // 第二行表头（字段行）
+
+  // 点击 × 隐藏列：根据 data-col 标识隐藏同名列
+  head2.addEventListener('click', (ev)=>{
+    const btn = ev.target.closest('button.x');
+    if(!btn) return;
+    const colKey = btn.dataset.hide;
+    if(!colKey) return;
+
+    // 隐藏表头单元格
+    [...head2.cells].forEach(th=>{
+      if(th.dataset.col === colKey){ th.style.display='none'; }
+    });
+
+    // 隐藏正文对应列
+    document.querySelectorAll(`#tbody [data-col="${colKey}"]`).forEach(td=>{
+      td.style.display = 'none';
+    });
+  });
+
+  // 恢复列（仅本页，刷新会重置）
+  document.getElementById('btnResetCols').addEventListener('click', ()=>{
+    [...head2.cells].forEach(th=> th.style.display='');
+    document.querySelectorAll('#tbody td').forEach(td=> td.style.display='');
+  });
+})();
 </script>
 
 <style>
 .printed-row { background: #f1fff1; }  /* 已打印变色 */
+th .x{ margin-left:6px; border:1px solid #e5e7eb; border-radius:6px; padding:0 6px; background:#fff; cursor:pointer; }
+th .x:hover{ background:#fee2e2; border-color:#ef4444; }
 </style>
+<style>
+  .col-hidden { display: none; }
+  th .x { margin-left:6px; border:none; background:transparent; cursor:pointer; }
+</style>
+
 {% endblock %}

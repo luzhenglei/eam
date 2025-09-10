@@ -60,13 +60,11 @@
   <!-- ===================== 端口属性（每个端口一个区块） ===================== -->
   <h3 style="margin-top:24px;">端口属性</h3>
   {% for p in attrs.ports %}
-    <fieldset style="border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0;{% if p.port.parent_port_id %}margin-left:32px;{% endif %}">
+    <fieldset style="border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0; margin-left: {{ (p.depth or 0) * 32 }}px;">
       <legend>端口：{{ p.port.name }}（ID: {{ p.port.id }}）</legend>
-      {% if not p.port.parent_port_id %}
       <div style="margin-bottom:8px;">
-        <button type="button" class="btn" onclick="addChildPort({{ p.port.id }})">新增子端口</button>
-      </div>
-      {% endif %}
+    <button type="button" class="btn" onclick="addChildPort({{ p.port.id }})">新增子端口</button>
+  </div>
       <div style="margin-bottom:8px;">
         <label>启用
           <input type="checkbox" class="toggle-port-active" data-url="{{ url_for('ports_bp.update_active', pid=device.project_id, port_id=p.port.id) }}" {% if p.port.is_active %}checked{% endif %}>

@@ -87,11 +87,12 @@
   }
 
   // 渲染端口块：重做折叠样式 + 输入框常显 + 支持“关闭/开启端口” + （可选）禁用控制
+
 function renderPorts(rows){
   const wrap = document.getElementById('ports');
   wrap.innerHTML = '';
 
-  // 分组：端口类型 -> 属性
+  // 分组：类型 -> 属性
   const grp = {};
   (rows || []).forEach(p => {
     const t = p.port_type_name || '未分类';
@@ -100,15 +101,14 @@ function renderPorts(rows){
     (grp[t][a] = grp[t][a] || []).push(p);
   });
 
-  // 外层：端口类型分组卡片
   Object.keys(grp).forEach(t => {
     const card = document.createElement('div');
     card.className = 'group-card';
     card.setAttribute('data-collapsed','false');
 
     const head = document.createElement('div');
-    head.className = 'group-header';
-    const typeCount = Object.values(grp[t]).reduce((s, arr) => s + arr.length, 0);
+    head.className  = 'group-header';
+    const typeCount = Object.values(grp[t]).reduce((s, arr)=> s + arr.length, 0);
     head.innerHTML = `
       <div class="title">
         <span class="dot"></span>
@@ -122,7 +122,6 @@ function renderPorts(rows){
     const body = document.createElement('div');
     body.className = 'group-body';
 
-    // 内层：属性分块
     Object.keys(grp[t]).forEach(a => {
       const sub = document.createElement('div');
       sub.className = 'sub-group';
@@ -142,25 +141,48 @@ function renderPorts(rows){
       const subBody = document.createElement('div');
       subBody.className = 'sub-body';
 
-      const list = document.createElement('ul');
-      list.className = 'port-list';
+      // === 在该属性分组内，按 parent_port_id 组装树 ===
+      const items = grp[t][a].slice();
+      const byId = new Map(items.map(p => [Number(p.port_id || p.id), p]));
+      const byParent = new Map();  // parentId -> children[]
+      const roots = [];
+      items.forEach(p=>{
+        const id = Number(p.port_id || p.id);
+        const pid = p.parent_port_id ? Number(p.parent_port_id) : null;
+        if (pid && byId.has(pid)) {
+          if (!byParent.has(pid)) byParent.set(pid, []);
+          byParent.get(pid).push(p);
+        } else {
+          roots.push(p);
+        }
+      });
 
-      grp[t][a].forEach(p => {
+      const ul = document.createElement('ul');
+      ul.className = 'port-list';
+
+      function renderNode(p, level){
+        const id        = Number(p.port_id || p.id);
+        const children  = byParent.get(id) || [];
+        const hasKids   = !!p.has_children || children.length > 0;
+
         const maxLinks  = toInt(p.max_links, null);
         const connCount = toInt(p.conn_count, null);
         const isActive  = ('is_active' in p) ? toInt(p.is_active, 1) : 1;
         const reached   = (maxLinks!=null && connCount!=null) ? (connCount >= maxLinks) : false;
 
-        // 只有开启且未满时显示输入区
-        const showBox = isActive && !(maxLinks!=null && connCount!=null && connCount >= maxLinks);
-
         const li = document.createElement('li');
         li.className = 'port-row';
+        li.style.paddingLeft = (level * 24) + 'px';   // 层级缩进
+
+        // 只有叶子 & 开启 & 未满 才显示输入区
+        const showBox = !hasKids && isActive && !(maxLinks!=null && connCount!=null && connCount >= maxLinks);
+
         li.innerHTML = `
           <div class="left">
             <code>${p.name}</code>
             ${p.attr_name ? `<span class="badge">${p.attr_name}</span>` : ''}
             <span class="meta">ID:${p.port_id || p.id || ''}</span>
+            ${hasKids ? '<span class="badge">有子端口</span>' : ''}
             ${isActive ? '' : '<span class="badge badge-red">已关闭</span>'}
             ${maxLinks!=null && connCount!=null ? `<span class="badge">已连 ${connCount}/${maxLinks}</span>` : ''}
           </div>
@@ -168,26 +190,26 @@ function renderPorts(rows){
             <div class="links"></div>
             ${
               showBox
-                ? `
-                  <div class="connect-box">
-                    <input type="text" class="searchTarget" data-port-id="${p.port_id||p.id}" placeholder="目标设备编号" list="dl-${p.port_id||p.id}">
-                    <datalist id="dl-${p.port_id||p.id}"></datalist>
-                    <select class="target-port" data-for-port="${p.port_id||p.id}">
-                      <option value="">(选择目标端口)</option>
-                    </select>
-                    <button class="btn btn-primary make-link" data-a-port="${p.port_id||p.id}">连线</button>
-                    <button class="btn btn-ghost toggle-port" data-port-id="${p.port_id||p.id}">${isActive ? '关闭端口' : '开启端口'}</button>
-                  </div>
-                `
-                : ''
+              ? `
+                <div class="connect-box">
+                  <input type="text" class="searchTarget" data-port-id="${id}" placeholder="目标设备编号" list="dl-${id}">
+                  <datalist id="dl-${id}"></datalist>
+                  <select class="target-port" data-for-port="${id}">
+                    <option value="">(选择目标端口)</option>
+                  </select>
+                  <button class="btn btn-primary make-link" data-a-port="${id}">连线</button>
+                  <button class="btn btn-ghost toggle-port" data-port-id="${id}">${isActive ? '关闭端口' : '开启端口'}</button>
+                </div>
+              `
+              : ''
             }
           </div>
         `;
 
-        // 现有连接展示（兼容数组 links 与单个 link_id 两种结构）
+        // 现有连接（兼容两种结构）
         const linksBox = li.querySelector('.links');
         if (Array.isArray(p.links) && p.links.length){
-          p.links.forEach(L => {
+          p.links.forEach(L=>{
             const item = document.createElement('div');
             item.className = 'link-item';
             item.innerHTML = `
@@ -206,8 +228,8 @@ function renderPorts(rows){
           linksBox.appendChild(item);
         }
 
-        // 如果你想保留“禁用控件”的保险逻辑，也可在 showBox=false 之外再判断
-        if (!isActive || reached){
+        // 非法时再保险禁用
+        if (!showBox){
           const inp = li.querySelector('.searchTarget');
           const sel = li.querySelector('.target-port');
           const mk  = li.querySelector('.make-link');
@@ -216,10 +238,15 @@ function renderPorts(rows){
           if (mk)  mk.disabled  = true;
         }
 
-        list.appendChild(li);
-      });
+        ul.appendChild(li);
 
-      subBody.appendChild(list);
+        // 递归渲染子节点
+        children.forEach(ch => renderNode(ch, level+1));
+      }
+
+      roots.forEach(r => renderNode(r, 0));
+
+      subBody.appendChild(ul);
       sub.appendChild(subBody);
       body.appendChild(sub);
     });
